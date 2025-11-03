@@ -12,4 +12,12 @@ export default defineNuxtConfig({
       supabaseKey: process.env.SUPABASE_KEY,
     },
   },
+  app: {
+    head: {
+      title: 'Sistema de Votación Escolar',
+      link: [
+        { rel: 'icon', type: 'image/png', href: '/favicon.png' }
+      ]
+    }
+  }
 })
