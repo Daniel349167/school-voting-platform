@@ -51,7 +51,6 @@ type Candidato = { id: number; nombre: string; descripcion?: string; imagen?: st
 const step = ref<'salon'|'dni'|'votar'>('salon')
 
 const grados = [1,2,3,4,5]
-const seccionesPorGrado: Record<number, string[]> = { 1:['A','B','C'], 2:['A','B','C'], 3:['A','B'], 4:['A','B'], 5:['A','B'] }
 
 // salón
 const grado = ref<number | ''>('')
@@ -69,6 +68,28 @@ const loading = ref(false)
 // UI helpers
 const dniInput = ref<HTMLInputElement|null>(null)
 const showModal = ref(false)
+
+
+// Secciones dinámicas desde la BD:
+const secciones = ref<string[]>([])
+
+// Cuando cambia el grado, pedimos las secciones reales a la API y reseteamos la selección
+watch(grado, async (g) => {
+  seccion.value = ''
+  secciones.value = []
+  if (!g) return
+  const res = await $fetch('/api/salones/secciones', {
+    method: 'GET',
+    query: { grado: String(g) }
+  }).catch(() => ({ ok: false }))
+
+  if (res?.ok) {
+    secciones.value = res.secciones
+  } else {
+    // si falla, puedes dejar vacío o algún fallback
+    secciones.value = []
+  }
+})
 
 // genera “confeti” simple
 const confetti = ref(Array.from({length: 22}).map(() => ({
@@ -227,9 +248,9 @@ const logout = async () => {
               </div>
               <div>
                 <label>Sección</label>
-                <select v-model="seccion" :disabled="!grado">
+                <select v-model="seccion" :disabled="!grado || !secciones.length">
                   <option value="">— seleccionar —</option>
-                  <option v-for="s in (grado ? seccionesPorGrado[grado] : [])" :key="s" :value="s">{{ s }}</option>
+                  <option v-for="s in secciones" :key="s" :value="s">{{ s }}</option>
                 </select>
               </div>
             </div>
