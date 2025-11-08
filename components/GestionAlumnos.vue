@@ -36,16 +36,16 @@
           <div>
             <label>Sección *</label>
             <select v-model="alumno.seccion" required :disabled="!alumno.grado">
-                <option value="">-- seleccionar --</option>
-                <option
+              <option value="">-- seleccionar --</option>
+              <option
                 v-for="sec in seccionesDisponibles"
                 :key="sec"
                 :value="sec"
-                >
+              >
                 {{ sec }}
-                </option>
+              </option>
             </select>
-            </div>
+          </div>
         </div>
 
         <p v-if="addError" class="upload-error">{{ addError }}</p>
@@ -75,6 +75,17 @@
       </form>
       <p v-if="delError" class="upload-error">{{ delError }}</p>
       <p v-if="delSuccess" class="upload-success">{{ delSuccess }}</p>
+    </div>
+
+    <!-- DESCARGA: Códigos generados (debajo del eliminar) -->
+    <div class="inline-box mt">
+      <h3 class="mb-sm">⬇️ Descargar alumnos con código generado</h3>
+      <p class="muted mb-sm">
+        Exporta en Excel a todos los alumnos cuyo <b>dni</b> es un <b>código generado</b>
+      </p>
+      <button class="upload-btn" @click="downloadCodigosGenerados">
+        Descargar
+      </button>
     </div>
   </div>
 </template>
@@ -177,4 +188,38 @@ const eliminar = async () => {
   delSuccess.value = 'Alumno eliminado.'
   dniEliminar.value = ''
 }
+
+/* === NUEVO: Descargar Excel con códigos generados (letra+3 dígitos) === */
+const downloadCodigosGenerados = () => {
+  // Deja que el navegador maneje la descarga (Content-Disposition del servidor)
+  window.location.href = '/api/alumnos/export-generados'
+}
 </script>
+
+<style scoped>
+/* puedes reutilizar las clases que ya tienes en tu tema */
+.inline-box{border:1px solid #e5e7eb;border-radius:12px;padding:12px;margin-top:10px}
+.mt{margin-top:14px}
+.mb{margin-bottom:10px}
+.mb-sm{margin-bottom:6px}
+.form-grid{display:grid;grid-template-columns:repeat(2,minmax(160px,1fr));gap:10px;margin-bottom:10px}
+.form-row{display:flex;gap:8px}
+.upload-btn{
+  width:auto;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  padding:10px 16px;
+  border-radius:10px;
+  border: none;
+  cursor:pointer;
+  color:#fff;
+  font-weight:600;
+  transition: background .2s;
+}
+
+
+.danger-btn{background:#fee2e2;border:1px solid #fecaca;border-radius:10px;padding:10px 16px;cursor:pointer}
+.upload-error{color:#b91c1c;background:#fee2e2;border:1px solid #fecaca;padding:8px;border-radius:8px}
+.upload-success{color:#065f46;background:#d1fae5;border:1px solid #a7f3d0;padding:8px;border-radius:8px}
+</style>

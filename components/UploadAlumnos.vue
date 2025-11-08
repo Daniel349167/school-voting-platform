@@ -13,6 +13,18 @@
       {{ successText || '✅ Alumnos cargados correctamente.' }}
     </p>
 
+    <div v-if="dedupInfo.total > 0" class="upload-info">
+      <p>
+        Detectados: {{ dedupInfo.total }} ·
+        Duplicados descartados: {{ dedupInfo.discarded }}
+      </p>
+      <ul v-if="dedupInfo.samples.length">
+        <li v-for="(s, i) in dedupInfo.samples" :key="i">
+          {{ s }}
+        </li>
+      </ul>
+    </div>
+
     <div v-if="preview.length" class="upload-preview">
       <h4>Vista previa (primeros 5)</h4>
       <table>
@@ -51,13 +63,17 @@
 <script setup lang="ts">
 import * as XLSX from 'xlsx'
 
-const rows = ref<any[]>([])      // filas listas para enviar (normalizadas)
-const allRows = ref<any[]>([])   // todas las filas leídas del archivo
+const rows = ref<any[]>([])      // filas listas para enviar (normalizadas y deduplicadas)
+const allRows = ref<any[]>([])   // todas las filas leídas y mapeadas (antes de deduplicar)
 const preview = ref<any[]>([])
 const loading = ref(false)
 const error = ref('')
 const success = ref(false)
 const successText = ref('')
+
+const dedupInfo = ref<{ total:number, unique:number, discarded:number, samples:string[] }>({
+  total: 0, unique: 0, discarded: 0, samples: []
+})
 
 /* =======================
  * Helpers de normalización
@@ -103,17 +119,27 @@ const splitNombre = (full: string) => {
 /** Normaliza el “código del estudiante” como string sin espacios extra */
 const normalizeCodigo = (v: any) => String(v ?? '').toString().trim()
 
-/** Decide el identificador a usar:
- *  - Si TIPO DE DOCUMENTO === 'DNI' y NÚMERO DE DOCUMENTO no está vacío → usar DNI.
- *  - En caso contrario → usar CÓDIGO DEL ESTUDIANTE.
- */
-const pickIdentificador = (tipoDoc: string, numDoc: string, codigo: string) => {
+/** Genera ID aleatorio: una letra (A-Z) + 3 dígitos (000-999) */
+const randLetter = () => String.fromCharCode(65 + Math.floor(Math.random() * 26))
+const rand3 = () => String(Math.floor(Math.random() * 1000)).padStart(3, '0')
+const makeRandomId = (used: Set<string>) => {
+  let id = ''
+  let guard = 0
+  do {
+    id = `${randLetter()}${rand3()}`
+    guard++
+    // evita bucle infinito en caso extremo
+    if (guard > 2000) break
+  } while (used.has(id))
+  used.add(id)
+  return id
+}
+
+/** Decide si se considera “DNI válido” (tipo === 'dni' y hay número) */
+const hasRealDni = (tipoDoc: string, numDoc: string) => {
   const tipo = normalizeKey(tipoDoc)
   const dni = String(numDoc || '').trim()
-  const cod = normalizeCodigo(codigo)
-  if (tipo === 'dni' && dni) return dni
-  // Si no hay DNI válido, usar el código (debe venir único por alumno)
-  return cod
+  return (tipo === 'dni' && !!dni)
 }
 
 const onFileChange = (e: Event) => {
@@ -123,6 +149,7 @@ const onFileChange = (e: Event) => {
   rows.value = []
   preview.value = []
   allRows.value = []
+  dedupInfo.value = { total: 0, unique: 0, discarded: 0, samples: [] }
 
   const target = e.target as HTMLInputElement
   const file = target.files?.[0]
@@ -163,7 +190,24 @@ const onFileChange = (e: Event) => {
     // Leemos como objetos desde esa fila
     const json = XLSX.utils.sheet_to_json(sheet, { range: headerRowIndex, defval: '' }) as any[]
 
-    const mapped = json.map((r) => {
+    // 1) Mapear filas a estructura intermedia
+    type Mapped = {
+      // datos visuales
+      nombres: string
+      apellidos: string
+      grado: number
+      seccion: string
+      // campos brutos
+      _tipoDoc: string
+      _numDoc: string
+      _codigo: string
+      // flags
+      _hasRealDni: boolean
+      // salida futura
+      dni: string  // será DNI real o aleatorio si no tiene DNI
+    }
+
+    const mapped: Mapped[] = json.map((r) => {
       // normalizamos keys para ser tolerantes a mayúsculas/acentos
       const norm: Record<string, any> = {}
       for (const k of Object.keys(r)) {
@@ -179,21 +223,79 @@ const onFileChange = (e: Event) => {
 
       const { apellidos, nombres } = splitNombre(String(estudiante || ''))
 
-      // Identificador final (dni o código del estudiante)
-      const dniOrCodigo = pickIdentificador(String(tipoDocRaw || ''), String(numDocRaw || ''), String(codigoEst || ''))
+      const _tipoDoc = String(tipoDocRaw || '')
+      const _numDoc  = String(numDocRaw || '').trim()
+      const _codigo  = normalizeCodigo(codigoEst)
 
       return {
-        dni: String(dniOrCodigo || ''),                 // se envía en el campo dni (PK)
         nombres: String(nombres || ''),
         apellidos: String(apellidos || ''),
         grado: gradoToNum(gradoRaw),
         seccion: String(seccionRaw || '').toUpperCase().trim(),
+        _tipoDoc,
+        _numDoc,
+        _codigo,
+        _hasRealDni: hasRealDni(_tipoDoc, _numDoc),
+        // 'dni' se asignará en la fase 2 (deduplicación + generación)
+        dni: ''
       }
     })
 
-    allRows.value = mapped
-    preview.value = mapped.slice(0, 5)
-    rows.value = mapped
+    // 2) Deduplicar según regla y asignar identificador final
+    const seenDni = new Set<string>()      // para quienes SÍ tienen DNI
+    const seenCod = new Set<string>()      // para quienes NO tienen DNI (se guía por CÓDIGO)
+    const usedGen = new Set<string>()      // para garantizar aleatorios únicos dentro del lote
+
+    const kept: any[] = []
+    const discards: string[] = []
+
+    for (const item of mapped) {
+      if (item._hasRealDni) {
+        const key = item._numDoc
+        if (seenDni.has(key)) {
+          discards.push(`Descartado por DNI duplicado: ${key} (${item.apellidos}, ${item.nombres})`)
+          continue
+        }
+        seenDni.add(key)
+        // Mantiene el DNI real como identificador final
+        kept.push({
+          dni: key,
+          nombres: item.nombres,
+          apellidos: item.apellidos,
+          grado: item.grado,
+          seccion: item.seccion
+        })
+      } else {
+        const cod = item._codigo
+        if (cod) {
+          if (seenCod.has(cod)) {
+            discards.push(`Descartado: ${cod} (${item.apellidos}, ${item.nombres})`)
+            continue
+          }
+          seenCod.add(cod)
+        }
+        // Generar identificador aleatorio (Letra + 3 dígitos) único en el lote
+        const genId = makeRandomId(usedGen)
+        kept.push({
+          dni: genId,
+          nombres: item.nombres,
+          apellidos: item.apellidos,
+          grado: item.grado,
+          seccion: item.seccion
+        })
+      }
+    }
+
+    allRows.value = kept
+    rows.value = kept
+    preview.value = kept.slice(0, 5)
+
+    dedupInfo.value = {
+      total: mapped.length,
+      unique: kept.length,
+      discarded: discards.length,
+      samples: discards.slice(0, 5)
+    }
   }
 
   reader.readAsBinaryString(file)
@@ -234,7 +336,7 @@ const enviar = async () => {
   const discarded = res.discarded ?? Math.max(0, total - inserted)
 
   success.value = true
-  successText.value = `Alumnos totales: ${total} · Alumnos cargados: ${inserted} · Filas descartadas: ${discarded}`
+  successText.value = `Alumnos totales: ${total} · Alumnos cargados: ${inserted}`
 }
 </script>
 
@@ -243,6 +345,7 @@ const enviar = async () => {
 .upload-input{padding:8px}
 .upload-error{color:#b91c1c;background:#fee2e2;border:1px solid #fecaca;padding:8px;border-radius:8px}
 .upload-success{color:#065f46;background:#d1fae5;border:1px solid #a7f3d0;padding:8px;border-radius:8px}
+.upload-info{color:#1f2937;background:#f3f4f6;border:1px solid #e5e7eb;padding:8px;border-radius:8px;margin-top:8px}
 .upload-preview table{width:100%;border-collapse:collapse}
 .upload-preview th,.upload-preview td{border:1px solid #e2e8f0;padding:10px}
 .upload-btn{
