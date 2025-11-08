@@ -11,7 +11,9 @@ type Voto = {
   en_blanco: boolean
   created_at: string
 }
-type Alumno = { dni: string; grado: any; seccion: string }
+
+// ⬇️ AHORA incluimos nombres y apellidos para armar "Apellidos, Nombres"
+type Alumno = { dni: string; grado: any; seccion: string; nombres?: string; apellidos?: string }
 type Candidato = { id: number; nombre: string }
 
 const toNum = (v: any) => (Number.isFinite(Number(v)) ? Number(v) : 0)
@@ -111,8 +113,9 @@ export default defineEventHandler(async (event) => {
     await supa.from('candidatos').select('id,nombre') as any
   if (eC) return { ok: false, msg: 'No se pudo leer candidatos' }
 
+  // ⬇️ Traemos nombres y apellidos además de dni/grado/seccion
   const { data: alumnos, error: eA } =
-    await supa.from('alumnos').select('dni,grado,seccion') as any
+    await supa.from('alumnos').select('dni,grado,seccion,nombres,apellidos') as any
   if (eA) return { ok: false, msg: 'No se pudo leer alumnos' }
 
   // Votos EN TIEMPO REAL (sin bloques)
@@ -125,6 +128,15 @@ export default defineEventHandler(async (event) => {
   const alumnosN = (alumnos || []).map((a: Alumno) => ({ ...a, grado: toNum(a.grado) }))
   const votosN = (votos || []).map((v: Voto) => ({ ...v, grado: toNum(v.grado) }))
   const totalAlumnos = alumnosN.length
+
+  // 🔎 Mapa DNI → "Apellidos, Nombres"
+  const nameByDni: Record<string, string> = {}
+  for (const a of alumnosN) {
+    const ap = (a.apellidos || '').trim()
+    const no = (a.nombres || '').trim()
+    const joined = [ap, no].filter(Boolean).join(', ')
+    nameByDni[a.dni] = joined
+  }
 
   // Conteos
   const keyBlanco = -1
@@ -230,12 +242,11 @@ export default defineEventHandler(async (event) => {
     r.getCell(3).numFmt = '0%'
   }
   if (allowBlank) {
-  const vb = gen[keyBlanco] || 0
-  const rb = ws1.addRow([nameBlanco, vb, totalEmitidos ? vb / totalEmitidos : 0, '', '', ''])
-  rb.getCell(2).numFmt = '0'
-  rb.getCell(3).numFmt = '0%'
-}
-
+    const vb = gen[keyBlanco] || 0
+    const rb = ws1.addRow([nameBlanco, vb, totalEmitidos ? vb / totalEmitidos : 0, '', '', ''])
+    rb.getCell(2).numFmt = '0'
+    rb.getCell(3).numFmt = '0%'
+  }
 
   // ===== Hoja 2: Por grado y sección =====
   const ws2 = wb.addWorksheet('Por grado y sección', { views: [{ state: 'frozen', ySplit: 3 }] })
@@ -284,7 +295,6 @@ export default defineEventHandler(async (event) => {
       rr.getCell(7).numFmt = '0%'
     }
 
-
     ws2.addRow([]) // separación visual
   }
 
@@ -292,16 +302,22 @@ export default defineEventHandler(async (event) => {
   const ws3 = wb.addWorksheet('Votos (detalle)')
   ws3.columns = [
     { key: 'dni', width: 14 },
+    // ⬇️ NUEVA COLUMNA "Nombres" (Apellidos, Nombres)
+    { key: 'nombres', width: 36 },
     { key: 'grado', width: 8 },
     { key: 'seccion', width: 8 },
     { key: 'fecha', width: 22 }
   ]
   sheetTitle(ws3, 'Listado de votos (orden cronológico)')
-  headerRow(ws3, ['DNI', 'Grado', 'Sección', 'Fecha (Lima)'])
+  // ⬇️ Encabezados actualizados con "Nombres"
+  headerRow(ws3, ['DNI', 'Nombres', 'Grado', 'Sección', 'Fecha (Lima)'])
+
   for (const v of votosN) {
-    ws3.addRow([v.dni, v.grado, v.seccion, toLimaDate(v.created_at)])
+    const nombre = nameByDni[v.dni] || '' // "Apellidos, Nombres" si existe
+    ws3.addRow([v.dni, nombre, v.grado, v.seccion, toLimaDate(v.created_at)])
   }
-  ws3.getColumn(4).numFmt = 'yyyy-mm-dd hh:mm:ss'
+  // ⬇️ Fecha ahora es la columna 5
+  ws3.getColumn(5).numFmt = 'yyyy-mm-dd hh:mm:ss'
 
   // → Buffer y respuesta
   const buf = await wb.xlsx.writeBuffer()

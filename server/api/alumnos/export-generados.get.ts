@@ -50,17 +50,26 @@ export default defineEventHandler(async (event) => {
     }
   })
 
-  // Cuerpo
-  rows.forEach(r => ws.addRow(r))
+    // Cuerpo
+    rows.forEach(r => ws.addRow(r))
 
-  // Anchos sugeridos
-  ws.columns = [
-  { width: 10, alignment: { horizontal: 'center' } }, // Número
-  { width: 40 }, // Nombre
-  { width: 12, alignment: { horizontal: 'center' } }, // Grado
-  { width: 12, alignment: { horizontal: 'center' } }, // Sección
-  { width: 18, alignment: { horizontal: 'center' } }  // Código
-]
+    // Anchos sugeridos
+    ws.columns = [
+    { width: 10 },
+    { width: 40 },
+    { width: 12 },
+    { width: 12 },
+    { width: 18 }
+    ]
+
+    // 🔥 Centramos columnas cortas (después de poner columnas y filas)
+    const colsToCenter = [1, 3, 4, 5]
+    colsToCenter.forEach(colIndex => {
+    ws.getColumn(colIndex).eachCell((cell) => {
+        cell.alignment = { horizontal: 'center', vertical: 'middle' }
+    })
+    })
+
 
   // 5) Buffer y respuesta como archivo descargable
   const buf = await wb.xlsx.writeBuffer()
