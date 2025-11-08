@@ -20,7 +20,8 @@ function normalizeGradoToText(v: unknown): string {
 
   if (/^[1-5]$/.test(raw)) return raw
 
-  const s = raw.toLowerCase()
+  const s = raw
+    .toLowerCase()
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/\s+/g, '')
 
@@ -41,101 +42,77 @@ function normalizeGradoToText(v: unknown): string {
   return raw || ''
 }
 
-/** Normaliza sección a una letra o cadena mayúscula sin tildes. */
+/** Normaliza sección a mayúsculas sin tildes. */
 function normalizeSeccion(v: unknown): string {
   if (v === null || v === undefined) return ''
   const s = String(v).trim().toUpperCase()
   return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
 }
 
-/** Genera DNI si está vacío: 2 letras paterno + 2 materno + '1111'.
- *  Desambiguación: si ya existe en el batch, aumenta el sufijo numérico. */
-function generarDniSiFalta(apellidos: string, usados: Set<string>): string {
-  const parts = (apellidos || '').trim().split(/\s+/)
-  const paterno = (parts[0] || 'XX').toUpperCase()
-  const materno = (parts[1] || 'XX').toUpperCase()
-
-  const p2 = (paterno.slice(0, 2) || 'XX').replace(/[^A-Z]/g, 'X')
-  const m2 = (materno.slice(0, 2) || 'XX').replace(/[^A-Z]/g, 'X')
-
-  let base = `${p2}${m2}1111` // 8 caracteres
-  if (!usados.has(base)) {
-    usados.add(base)
-    return base
-  }
-  // desambiguar cambiando el último bloque numérico
-  let n = 1112
-  while (usados.has(`${p2}${m2}${n}`) && n <= 9999) n++
-  const cand = `${p2}${m2}${String(n).padStart(4, '0')}`.slice(0, 8)
-  usados.add(cand)
-  return cand
-}
-
 export default defineEventHandler(async (event) => {
   // 1) Payload
   const body = await readBody<{ alumnos: AlumnoIn[]; totalRows?: number }>(event)
   const recibidos = Array.isArray(body?.alumnos) ? body.alumnos : []
-  const totalRecibidos = typeof body?.totalRows === 'number' ? body.totalRows : recibidos.length
+  const totalRecibidos =
+    typeof body?.totalRows === 'number' ? body.totalRows : recibidos.length
 
   // 2) Config Supabase
   const cfg = useRuntimeConfig()
   const supabaseUrl = cfg.public.supabaseUrl
   const serviceKey = cfg.supabaseServiceRole
   if (!supabaseUrl || !serviceKey) {
-    return { ok: false, msg: 'Supabase no configurado', total: totalRecibidos, inserted: 0, discarded: 0 }
+    return {
+      ok: false,
+      msg: 'Supabase no configurado',
+      total: totalRecibidos,
+      inserted: 0,
+      discarded: 0,
+    }
   }
   const supa = createClient(supabaseUrl, serviceKey)
 
-  // 3) Normalización + generación de DNI faltante
-  const usadosEnBatch = new Set<string>()
+  // 3) Normalización (SIN generar DNIs)
   const limpiar = (v?: string | null) => (v ?? '').toString().trim()
 
-  const preparados = recibidos.map((a) => {
-    let dni = limpiar(a.dni)
+  // Dedup por dni dentro del batch para evitar conflictos en un mismo lote
+  const seen = new Set<string>()
+  const preparados = []
+  for (const a of recibidos) {
+    const dni = limpiar(a.dni) // ← viene del frontend (DNI real o código de estudiante)
+    if (!dni) continue // descartamos filas sin DNI/código
+
+    if (seen.has(dni)) continue
+    seen.add(dni)
+
     const nombres = limpiar(a.nombres)
     const apellidos = limpiar(a.apellidos)
-    const gradoTxt = normalizeGradoToText(a.grado as any) // ← DB: TEXT NOT NULL
+    const gradoTxt = normalizeGradoToText(a.grado as any)
     const seccionTxt = normalizeSeccion(a.seccion)
 
-    if (!dni) {
-      dni = generarDniSiFalta(apellidos, usadosEnBatch)
-    } else {
-      // asegurar unicidad dentro del mismo batch
-      if (usadosEnBatch.has(dni)) {
-        dni = generarDniSiFalta(apellidos, usadosEnBatch)
-      } else {
-        usadosEnBatch.add(dni)
-      }
-    }
-
-    return {
+    preparados.push({
       dni,                                 // PK
-      nombres: nombres || '',              // NOT NULL en tu schema
-      apellidos: apellidos || '',          // NOT NULL en tu schema
+      nombres: nombres || '',              // NOT NULL
+      apellidos: apellidos || '',          // NOT NULL
       grado: gradoTxt,                     // TEXT NOT NULL ('' si no se reconoce)
       seccion: seccionTxt || '',           // NOT NULL
-    }
-  })
+    })
+  }
 
-  // inválidos solo si POR ALGUNA RAZÓN quedó sin dni (no debería pasar)
-  const validos = preparados.filter(a => a.dni.length > 0)
-
-  if (validos.length === 0) {
+  if (preparados.length === 0) {
     return {
       ok: false,
-      msg: 'No había alumnos con DNI para procesar.',
+      msg: 'No hay alumnos válidos con DNI/código para procesar.',
       total: totalRecibidos,
       inserted: 0,
-      discarded: totalRecibidos
+      discarded: totalRecibidos,
     }
   }
 
   // 4) Upsert por lotes sobre PK (dni)
-  //    IMPORTANTE: en tu tabla ya existe PRIMARY KEY (dni) → sirve como onConflict
   let afectados = 0
 
-  for (let i = 0; i < validos.length; i += BATCH_SIZE) {
-    const slice = validos.slice(i, i + BATCH_SIZE)
+  for (let i = 0; i < preparados.length; i += BATCH_SIZE) {
+    const slice = preparados.slice(i, i + BATCH_SIZE)
 
     const { data, error } = await supa
       .from('alumnos')
@@ -149,7 +126,7 @@ export default defineEventHandler(async (event) => {
         msg: 'Error al insertar/actualizar alumnos.',
         total: totalRecibidos,
         inserted: afectados,
-        discarded: totalRecibidos - (i + slice.length) // aproximación de lo que faltó procesar
+        discarded: totalRecibidos - (i + slice.length), // aproximación
       }
     }
 
@@ -161,6 +138,6 @@ export default defineEventHandler(async (event) => {
     msg: 'Alumnos importados/actualizados correctamente.',
     total: totalRecibidos,
     inserted: afectados,
-    discarded: totalRecibidos - validos.length // los únicos descartados serían los sin DNI imposible (no debería ocurrir)
+    discarded: totalRecibidos - preparados.length,
   }
 })

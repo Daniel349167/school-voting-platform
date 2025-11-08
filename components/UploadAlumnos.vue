@@ -18,7 +18,7 @@
       <table>
         <thead>
           <tr>
-            <th>DNI</th>
+            <th>DNI o Código</th>
             <th>Nombres</th>
             <th>Apellidos</th>
             <th>Grado</th>
@@ -51,8 +51,8 @@
 <script setup lang="ts">
 import * as XLSX from 'xlsx'
 
-const rows = ref<any[]>([])          // filas a enviar (ya normalizadas)
-const allRows = ref<any[]>([])       // todas las filas leídas (info)
+const rows = ref<any[]>([])      // filas listas para enviar (normalizadas)
+const allRows = ref<any[]>([])   // todas las filas leídas del archivo
 const preview = ref<any[]>([])
 const loading = ref(false)
 const error = ref('')
@@ -65,8 +65,7 @@ const successText = ref('')
 const normalizeKey = (str: string) => {
   return String(str || '')
     .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
 }
@@ -77,10 +76,9 @@ const gradoToNum = (sRaw: any) => {
     'primero': 1, '1': 1, '1°': 1,
     'segundo': 2, '2': 2, '2°': 2,
     'tercero': 3, '3': 3, '3°': 3,
-    'cuarto': 4,  '4': 4, '4°': 4,
-    'quinto': 5,  '5': 5, '5°': 5
+    'cuarto':  4, '4': 4, '4°': 4,
+    'quinto':  5, '5': 5, '5°': 5,
   }
-  // 👇 corrige el error del ?? con ||
   const v = map[s]
   return (v ?? Number.parseInt(s)) || 0
 }
@@ -89,39 +87,43 @@ const gradoToNum = (sRaw: any) => {
 const splitNombre = (full: string) => {
   const txt = String(full || '').trim()
   if (!txt) return { apellidos: '', nombres: '' }
-  const parts = txt.split(',') // formato del padrón
+  const parts = txt.split(',') // padrón: "APELLIDOS, NOMBRES"
   if (parts.length >= 2) {
-    return { apellidos: parts[0].trim(), nombres: parts.slice(1).join(',').trim() }
+    return {
+      apellidos: parts[0].trim(),
+      nombres: parts.slice(1).join(',').trim(),
+    }
   }
-  // fallback: último token como nombre
+  // fallback
   const tokens = txt.split(/\s+/)
   if (tokens.length <= 1) return { apellidos: txt, nombres: '' }
-  return {
-    apellidos: tokens.slice(0, -1).join(' '),
-    nombres: tokens.slice(-1)[0]
-  }
+  return { apellidos: tokens.slice(0, -1).join(' '), nombres: tokens.slice(-1)[0] }
 }
 
-/** DNI de respaldo: 2 letras paterno + 2 letras materno + “1111” → largo 8 */
-const fallbackDni = (apellidos: string) => {
-  const clean = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase()
-  const aps = clean(apellidos)
-  // patrón esperado: "PATERNO MATERNO, ..." o "PATERNO MATERNO"
-  const sinComa = aps.split(',')[0] || ''
-  const toks = sinComa.trim().split(/\s+/)
-  const paterno = toks[0] || 'XX'
-  const materno = toks[1] || 'XX'
-  let base = (paterno.slice(0, 2) || 'XX') + (materno.slice(0, 2) || 'XX') + '1111'
-  // asegura longitud 8
-  if (base.length < 8) base = base.padEnd(8, '1')
-  if (base.length > 8) base = base.slice(0, 8)
-  return base
+/** Normaliza el “código del estudiante” como string sin espacios extra */
+const normalizeCodigo = (v: any) => String(v ?? '').toString().trim()
+
+/** Decide el identificador a usar:
+ *  - Si TIPO DE DOCUMENTO === 'DNI' y NÚMERO DE DOCUMENTO no está vacío → usar DNI.
+ *  - En caso contrario → usar CÓDIGO DEL ESTUDIANTE.
+ */
+const pickIdentificador = (tipoDoc: string, numDoc: string, codigo: string) => {
+  const tipo = normalizeKey(tipoDoc)
+  const dni = String(numDoc || '').trim()
+  const cod = normalizeCodigo(codigo)
+  if (tipo === 'dni' && dni) return dni
+  // Si no hay DNI válido, usar el código (debe venir único por alumno)
+  return cod
 }
 
 const onFileChange = (e: Event) => {
   error.value = ''
   success.value = false
   successText.value = ''
+  rows.value = []
+  preview.value = []
+  allRows.value = []
+
   const target = e.target as HTMLInputElement
   const file = target.files?.[0]
   if (!file) return
@@ -133,83 +135,59 @@ const onFileChange = (e: Event) => {
     const sheetName = workbook.SheetNames[0]
     const sheet = workbook.Sheets[sheetName]
 
-    // Leemos en crudo para ubicar la fila de cabeceras reales (donde empiece GRADO/SECCIÓN/…)
+    // Leemos en crudo para detectar la fila de cabeceras REALES
     const raw = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1, defval: '' }) as string[][]
     let headerRowIndex = -1
 
-    // Buscamos una fila que contenga al menos GRADO y SECCIÓN (nuevo formato)
+    // Buscamos una fila que tenga al menos estas columnas del nuevo formato
+    // GRADO | SECCIÓN | TIPO DE DOCUMENTO | NÚMERO DE DOCUMENTO | CÓDIGO DEL ESTUDIANTE | ESTUDIANTE
     for (let i = 0; i < raw.length; i++) {
       const row = raw[i].map(c => normalizeKey(c))
-      const hasGrado = row.some(c => c === 'grado')
-      const hasSecc  = row.some(c => c.startsWith('seccion'))
-      const hasNumDoc = row.some(c => c.includes('numero de documento') || c === 'dni')
-      const hasEst = row.some(c => c === 'estudiante')
-      if (hasGrado && hasSecc && hasNumDoc && hasEst) {
+      const hasGrado   = row.some(c => c === 'grado')
+      const hasSeccion = row.some(c => c.startsWith('seccion'))
+      const hasTipo    = row.some(c => c === 'tipo de documento' || c === 'documento')
+      const hasNumDoc  = row.some(c => c === 'numero de documento' || c === 'dni')
+      const hasCodigo  = row.some(c => c === 'codigo del estudiante' || c === 'codigo')
+      const hasEst     = row.some(c => c === 'estudiante')
+      if (hasGrado && hasSeccion && hasTipo && hasNumDoc && hasCodigo && hasEst) {
         headerRowIndex = i
         break
       }
     }
 
     if (headerRowIndex === -1) {
-      error.value = 'No se encontró una fila de cabeceras válida (GRADO/SECCIÓN/NÚMERO DE DOCUMENTO/ESTUDIANTE).'
+      error.value = 'No se encontró la fila de cabeceras válida (GRADO/SECCIÓN/TIPO/NÚMERO/CÓDIGO/ESTUDIANTE).'
       return
     }
 
-    // Leemos ya como objetos a partir de la fila encontrada
-    const json = XLSX.utils.sheet_to_json(sheet, {
-      range: headerRowIndex,
-      defval: ''
-    }) as any[]
+    // Leemos como objetos desde esa fila
+    const json = XLSX.utils.sheet_to_json(sheet, { range: headerRowIndex, defval: '' }) as any[]
 
-    // Mapeo exacto por nombre de columna del nuevo padrón
     const mapped = json.map((r) => {
-      // normalizamos keys para ser tolerantes
+      // normalizamos keys para ser tolerantes a mayúsculas/acentos
       const norm: Record<string, any> = {}
       for (const k of Object.keys(r)) {
         norm[normalizeKey(k)] = r[k]
       }
 
-      const gradoRaw =
-        r['GRADO'] ?? r['grado'] ?? norm['grado'] ?? ''
+      const gradoRaw   = r['GRADO'] ?? r['grado'] ?? norm['grado'] ?? ''
+      const seccionRaw = r['SECCIÓN'] ?? r['SECCION'] ?? r['sección'] ?? r['seccion'] ?? norm['seccion'] ?? ''
+      const tipoDocRaw = r['TIPO DE DOCUMENTO'] ?? r['tipo de documento'] ?? r['DOCUMENTO'] ?? norm['tipo de documento'] ?? norm['documento'] ?? ''
+      const numDocRaw  = r['NÚMERO DE DOCUMENTO'] ?? r['NUMERO DE DOCUMENTO'] ?? r['numero de documento'] ?? norm['numero de documento'] ?? norm['dni'] ?? ''
+      const codigoEst  = r['CÓDIGO DEL ESTUDIANTE'] ?? r['CODIGO DEL ESTUDIANTE'] ?? r['codigo del estudiante'] ?? norm['codigo del estudiante'] ?? norm['codigo'] ?? ''
+      const estudiante = r['ESTUDIANTE'] ?? r['estudiante'] ?? norm['estudiante'] ?? ''
 
-      const seccionRaw =
-        r['SECCIÓN'] ?? r['SECCION'] ?? r['sección'] ?? r['seccion'] ?? norm['seccion'] ?? ''
+      const { apellidos, nombres } = splitNombre(String(estudiante || ''))
 
-      const numDocRaw =
-      r['NÚMERO DE DOCUMENTO'] ?? r['NUMERO DE DOCUMENTO'] ?? r['numero de documento'] ??
-      norm['numero de documento'] ?? norm['dni'] ?? ''
-
-      const tipoDocRaw =
-        r['TIPO DE DOCUMENTO'] ?? r['tipo de documento'] ?? r['DOCUMENTO'] ??
-        norm['tipo de documento'] ?? norm['documento'] ?? norm['tipodedocumento'] ?? ''
-
-      const estudianteRaw =
-        r['ESTUDIANTE'] ?? r['estudiante'] ?? norm['estudiante'] ?? ''
-
-      const { apellidos, nombres } = splitNombre(String(estudianteRaw || ''))
-
-      // ¿Es DNI?
-      const tipoNorm = normalizeKey(String(tipoDocRaw || ''))
-      const esDNI = (tipoNorm === 'dni')
-
-      // Regla:
-      // - Si es DNI y viene número -> usarlo.
-      // - Si NO es DNI (vacío, “CE”, etc.) o no hay número -> generar fallback.
-      let dni = ''
-      if (esDNI) {
-        dni = String(numDocRaw || '').trim()
-      }
-      if (!dni) {
-        dni = fallbackDni(apellidos)
-      }
-
+      // Identificador final (dni o código del estudiante)
+      const dniOrCodigo = pickIdentificador(String(tipoDocRaw || ''), String(numDocRaw || ''), String(codigoEst || ''))
 
       return {
-        dni,
+        dni: String(dniOrCodigo || ''),                 // se envía en el campo dni (PK)
         nombres: String(nombres || ''),
         apellidos: String(apellidos || ''),
         grado: gradoToNum(gradoRaw),
-        seccion: String(seccionRaw || '').toUpperCase().trim()
+        seccion: String(seccionRaw || '').toUpperCase().trim(),
       }
     })
 
@@ -236,7 +214,7 @@ const enviar = async () => {
   const res = await $fetch('/api/alumnos/import', {
     method: 'POST',
     body: {
-      alumnos: rows.value,              // ahora enviamos todos (con DNI generado si faltaba)
+      alumnos: rows.value,
       totalRows: allRows.value.length
     }
   }).catch((err) => {
@@ -268,12 +246,8 @@ const enviar = async () => {
 .upload-preview table{width:100%;border-collapse:collapse}
 .upload-preview th,.upload-preview td{border:1px solid #e2e8f0;padding:10px}
 .upload-btn{
-  width: auto;           /* deja de ocupar 100% */
-  display: inline-flex;  /* tamaño ajustado al contenido */
-  align-items: center;
-  justify-content: center;
-  padding: 10px 16px;    /* igual que antes si ya lo tenías */
-  border-radius: 10px;   /* igual que antes si ya lo tenías */
+  width: auto; display: inline-flex; align-items: center; justify-content: center;
+  padding: 10px 16px; border-radius: 10px;
 }
 .upload-btn:disabled{opacity:.6;cursor:not-allowed}
 </style>
