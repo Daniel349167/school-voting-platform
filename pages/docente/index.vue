@@ -156,7 +156,18 @@ onMounted(() => {
 })
 watch(current, (v) => { if (v === 'estadisticas') fetchRealtime() })
 
-const series = computed(() => stats.totales.porLista || [])
+// Habilitar/ocultar "Voto en blanco" según .env
+const allowBlank = computed(() => {
+  const v = String(useRuntimeConfig().public.VOTO_BLANCO ?? 'si').toLowerCase()
+  return v === 'si' || v === 'sí' || v === 'true' || v === '1' || v === 'on'
+})
+
+
+const series = computed(() => {
+  const arr = stats.totales.porLista || []
+  return allowBlank.value ? arr : arr.filter(r => String(r.nombre).toLowerCase() !== 'voto en blanco')
+})
+
 const widthPct = (v:number) => {
   const total = stats.totales.totalEmitidos || 1
   return Math.round((v / total) * 100)

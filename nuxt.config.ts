@@ -10,6 +10,7 @@ export default defineNuxtConfig({
       PUBLIC_RESULT_BLOCK: process.env.PUBLIC_RESULT_BLOCK, 
       supabaseUrl: process.env.SUPABASE_URL,
       supabaseKey: process.env.SUPABASE_KEY,
+      VOTO_BLANCO: process.env.PUBLIC_VOTO_BLANCO ?? 'si'
     },
   },
   app: {

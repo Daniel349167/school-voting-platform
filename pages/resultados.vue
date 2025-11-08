@@ -78,6 +78,9 @@ const loading = ref(false)
 const data = ref<{ totales: Totales, porGrado: PorGrado } | null>(null)
 const gradoSel = ref<'general'|1|2|3|4|5>('general')
 
+const cfg = useRuntimeConfig()
+const ALLOW_BLANK = /^(1|true|yes|si)$/i.test(String(cfg.public.VOTO_BLANCO ?? 'si'))
+
 const opciones = [
   { val:'general' as const, lbl:'General' },
   { val:1 as const, lbl:'1°' },
@@ -117,9 +120,12 @@ const resumen = computed(() => {
 
 const serieBase = computed<PorLista[]>(() => {
   if (!data.value) return []
-  return (gradoSel.value === 'general')
+  const base = (gradoSel.value === 'general')
     ? data.value.totales.porLista
     : (data.value.porGrado[gradoSel.value as number]?.porLista || [])
+
+  // ← NUEVO: ocultar “voto en blanco” si no está permitido
+  return ALLOW_BLANK ? base : base.filter(r => r.nombre?.toLowerCase() !== 'voto en blanco')
 })
 
 // Ordenar desc, barra animada

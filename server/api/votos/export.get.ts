@@ -102,6 +102,10 @@ export default defineEventHandler(async (event) => {
   const cfg = useRuntimeConfig()
   const supa = createClient(cfg.public.supabaseUrl, cfg.supabaseServiceRole)
 
+  const allowBlank = String(cfg.public.VOTO_BLANCO ?? 'si')
+    .toLowerCase()
+    .match(/^(si|sí|true|1|on)$/) !== null
+
   // Catálogos
   const { data: candidatos, error: eC } =
     await supa.from('candidatos').select('id,nombre') as any
@@ -210,7 +214,8 @@ export default defineEventHandler(async (event) => {
   ws1.addRow([])
   headerRow(ws1, ['Indicador', 'Detalle', 'Notas', '', '', ''])
   const ganadorTexto = ganadores.length ? ganadores.join(', ') : 'Sin ganador aún'
-  ws1.addRow(['Ganador(es) virtual(es)', ganadorTexto, 'Cálculo en tiempo real (excluye voto en blanco)', '', '', ''])
+  const notaGanador = 'Cálculo en tiempo real' + (allowBlank ? ' (excluye voto en blanco)' : '')
+  ws1.addRow(['Ganador(es) virtual(es)', ganadorTexto, notaGanador, '', '', ''])
 
   ws1.addRow([])
   sheetTitle(ws1, 'Distribución por listas (general)')
@@ -224,10 +229,13 @@ export default defineEventHandler(async (event) => {
     r.getCell(2).numFmt = '0'
     r.getCell(3).numFmt = '0%'
   }
+  if (allowBlank) {
   const vb = gen[keyBlanco] || 0
   const rb = ws1.addRow([nameBlanco, vb, totalEmitidos ? vb / totalEmitidos : 0, '', '', ''])
   rb.getCell(2).numFmt = '0'
   rb.getCell(3).numFmt = '0%'
+}
+
 
   // ===== Hoja 2: Por grado y sección =====
   const ws2 = wb.addWorksheet('Por grado y sección', { views: [{ state: 'frozen', ySplit: 3 }] })
@@ -267,12 +275,15 @@ export default defineEventHandler(async (event) => {
       r.getCell(6).numFmt = '0%'
       r.getCell(7).numFmt = '0%'
     }
-    const cb = box.porLista[keyBlanco] || 0
-    const rr = ws2.addRow([`${g}°`, sec, nameBlanco, cb, em, em ? cb / em : 0, totSec ? em / totSec : 0])
-    rr.getCell(4).numFmt = '0'
-    rr.getCell(5).numFmt = '0'
-    rr.getCell(6).numFmt = '0%'
-    rr.getCell(7).numFmt = '0%'
+    if (allowBlank) {
+      const cb = box.porLista[keyBlanco] || 0
+      const rr = ws2.addRow([`${g}°`, sec, nameBlanco, cb, em, em ? cb / em : 0, totSec ? em / totSec : 0])
+      rr.getCell(4).numFmt = '0'
+      rr.getCell(5).numFmt = '0'
+      rr.getCell(6).numFmt = '0%'
+      rr.getCell(7).numFmt = '0%'
+    }
+
 
     ws2.addRow([]) // separación visual
   }
