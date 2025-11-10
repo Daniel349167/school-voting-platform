@@ -89,6 +89,12 @@ export default defineEventHandler(async () => {
     const alumnosN = alumnos.map((a) => ({ ...a, grado: toNum(a.grado) }))
     const totalAlumnos = alumnosN.length
 
+    // Totales por grado (actuales) para inyectar siempre
+    const totalAlumnosPorGrado: Record<number, number> = {}
+    for (const g of GRADOS) {
+      totalAlumnosPorGrado[g] = alumnosN.filter((a) => a.grado === g).length
+    }
+
     // === Votos (ordenados) ===
     const vtQ = await supa
       .from('votos')
@@ -112,9 +118,7 @@ export default defineEventHandler(async () => {
       const alG = alumnosN.filter((a) => a.grado === g)
       const vtG = votosN.filter((v) => v.grado === g)
       const isFinalG = alG.length > 0 && vtG.length >= alG.length
-      const cutoffG = isFinalG
-        ? vtG.length
-        : Math.floor(vtG.length / BLOCK) * BLOCK
+      const cutoffG = isFinalG ? vtG.length : Math.floor(vtG.length / BLOCK) * BLOCK
       const vtGK = vtG.slice(0, cutoffG)
       porGradoClamped[g] = {
         totalAlumnos: alG.length,
@@ -176,15 +180,31 @@ export default defineEventHandler(async () => {
       return payloadClamped
     }
 
-    // Si no hay nuevo múltiplo, devuelve snapshot existente si lo hay
+    // === NUEVO: si no hay nuevo múltiplo, devolvemos snapshot *inyectando* los totales actuales de alumnos
     if (snapQ.data?.payload) {
-      // garantizamos que tenga ok/meta
       const p = snapQ.data.payload as any
+
+      // Parcheamos totales generales
+      const totalesPatched = {
+        ...(p?.totales ?? {}),
+        totalAlumnos, // <-- inyecta total actual de alumnos
+      }
+
+      // Parcheamos totales por grado manteniendo emitidos/porLista del snapshot
+      const porGradoPatched: any = {}
+      for (const g of GRADOS) {
+        const snapG = p?.porGrado?.[g] ?? {}
+        porGradoPatched[g] = {
+          ...snapG,
+          totalAlumnos: totalAlumnosPorGrado[g], // <-- inyecta total actual
+        }
+      }
+
       return {
         ok: true,
         meta: p?.meta ?? { block: BLOCK },
-        totales: p?.totales,
-        porGrado: p?.porGrado,
+        totales: totalesPatched,
+        porGrado: porGradoPatched,
       }
     }
 
@@ -193,10 +213,9 @@ export default defineEventHandler(async () => {
       return payloadClamped
     }
 
-    // Todo en cero
+    // Todo en cero (pero con totales de alumnos correctos)
     return buildZeroPayload(totalAlumnos, alumnosN, candidatos, BLOCK)
   } catch (e: any) {
-    // Nunca lanzamos errores: siempre devolvemos JSON llano
     const msg =
       (e && e.message) ||
       (typeof e === 'string' ? e : 'Error inesperado en resultados')

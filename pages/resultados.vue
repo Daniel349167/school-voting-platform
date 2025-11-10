@@ -5,7 +5,10 @@
       <!-- Header -->
       <div class="hero">
         <div class="hero-top">
-          <div class="brand"><span class="badge">📊</span><h1>Resultados en tiempo real</h1></div>
+          <div class="brand">
+            <span class="badge">📊</span>
+            <h1>Resultados en tiempo real</h1>
+          </div>
           <div class="actions">
             <NuxtLink to="/login" class="btn ghost">Ir al login</NuxtLink>
             <button class="btn" @click="fetchData" :disabled="loading">
@@ -13,16 +16,27 @@
             </button>
           </div>
         </div>
-        <svg class="wave" viewBox="0 0 1200 90" preserveAspectRatio="none"><path d="M0,0 C350,80 800,-40 1200,50 L1200,120 L0,120 Z"/></svg>
+        <svg class="wave" viewBox="0 0 1200 90" preserveAspectRatio="none">
+          <path d="M0,0 C350,80 800,-40 1200,50 L1200,120 L0,120 Z"/>
+        </svg>
       </div>
 
       <!-- Contenido -->
       <div class="content">
+        <!-- Aviso de error suave -->
+        <div v-if="errorMsg" class="alert">
+          {{ errorMsg }}
+        </div>
+
         <!-- Tabs -->
         <div class="tabs">
-          <button v-for="opt in opciones" :key="opt.val"
-                  class="tab" :class="{ active: gradoSel===opt.val }"
-                  @click="gradoSel = opt.val; animateNow()">
+          <button
+            v-for="opt in opciones"
+            :key="opt.val"
+            class="tab"
+            :class="{ active: gradoSel===opt.val }"
+            @click="() => { gradoSel = opt.val; animateNow() }"
+          >
             {{ opt.lbl }}
           </button>
         </div>
@@ -55,26 +69,42 @@
                 <span class="val">{{ row.conteo }}</span>
               </div>
               <div class="bar-track">
-                <div class="bar-fill" :style="{
-                  '--w': barWidth(row.conteo) + '%',
-                  '--idx': i
-                }"></div>
+                <div
+                  class="bar-fill"
+                  :style="{ '--w': barWidth(row.conteo) + '%', '--idx': i }"
+                />
               </div>
             </div>
           </div>
         </div>
 
+        <p class="note">Los datos se muestran en bloques de publicación para proteger el secreto del voto.</p>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+// =====================
+// Tipos y constantes
+// =====================
 type PorLista = { id:number, nombre:string, conteo:number }
 type Totales = { totalAlumnos:number, totalEmitidos:number, porLista:PorLista[] }
 type PorGrado = Record<number, { totalAlumnos:number, emitidos:number, porLista:PorLista[] }>
 
+// Estructura opcional como llega desde la API (defensivo)
+type ApiPayload = {
+  ok: boolean
+  meta?: { block?: number }
+  totales?: Partial<Totales>
+  porGrado?: Record<number, Partial<PorGrado[number]>>
+  msg?: string
+}
+
+const GRADOS = [1,2,3,4,5] as const
+
 const loading = ref(false)
+const errorMsg = ref<string>('') // <-- NUEVO: mensaje suave
 const data = ref<{ totales: Totales, porGrado: PorGrado } | null>(null)
 const gradoSel = ref<'general'|1|2|3|4|5>('general')
 
@@ -90,14 +120,58 @@ const opciones = [
   { val:5 as const, lbl:'5°' },
 ]
 
+// =====================
+// Normalización robusta
+// =====================
+// Asegura que siempre existan totales, porGrado y porLista,
+// incluso si la API no los envía por bloqueo < PUBLIC_RESULT_BLOCK.
+function normalizePayload(p: ApiPayload | null | undefined): { totales: Totales, porGrado: PorGrado } {
+  const emptyList: PorLista[] = []
+  const totales: Totales = {
+    totalAlumnos: Math.max(0, Number(p?.totales?.totalAlumnos ?? 0)),
+    totalEmitidos: Math.max(0, Number(p?.totales?.totalEmitidos ?? 0)),
+    porLista: Array.isArray(p?.totales?.porLista) ? p!.totales!.porLista as PorLista[] : emptyList
+  }
+
+  // porGrado con fallback para los 5 grados
+  const porGrado: PorGrado = {} as any
+  for (const g of GRADOS) {
+    const gRaw = p?.porGrado?.[g] ?? {}
+    porGrado[g] = {
+      totalAlumnos: Math.max(0, Number((gRaw as any).totalAlumnos ?? 0)),
+      emitidos: Math.max(0, Number((gRaw as any).emitidos ?? 0)),
+      porLista: Array.isArray((gRaw as any).porLista) ? (gRaw as any).porLista as PorLista[] : emptyList
+    }
+  }
+  return { totales, porGrado }
+}
+
+// =====================
+// Carga de datos
+// =====================
 const fetchData = async () => {
+  errorMsg.value = ''
   loading.value = true
-  const res = await $fetch('/api/votos/resultados')
-    .catch(() => ({ ok:false }))
-  loading.value = false
-  if (!(res as any)?.ok) return
-  data.value = { totales: (res as any).totales, porGrado: (res as any).porGrado }
-  animateNow()
+  try {
+    const res = await $fetch<ApiPayload>('/api/votos/resultados').catch(() => null)
+    loading.value = false
+
+    if (!res || res.ok === false) {
+      errorMsg.value = res?.msg || 'No se pudieron obtener los resultados todavía.'
+      // Aún así, deja data normalizada en cero para no romper la UI
+      data.value = normalizePayload(res || { ok:false })
+      await animateNow()
+      return
+    }
+
+    data.value = normalizePayload(res)
+    await animateNow()
+  } catch (e:any) {
+    loading.value = false
+    errorMsg.value = 'Error de red o del servidor al obtener resultados.'
+    data.value = normalizePayload({ ok:false })
+    await animateNow()
+  }
 }
 
 // Cargar datos una sola vez al entrar
@@ -105,49 +179,60 @@ onMounted(() => {
   fetchData()
 })
 
-// Derivados UI
+// =====================
+// Derivados UI robustos
+// =====================
 const resumen = computed(() => {
   if (!data.value) return { totalAlumnos:0, totalEmitidos:0 }
   if (gradoSel.value === 'general') {
     return {
-      totalAlumnos: data.value.totales.totalAlumnos,
-      totalEmitidos: data.value.totales.totalEmitidos
+      totalAlumnos: data.value.totales?.totalAlumnos ?? 0,
+      totalEmitidos: data.value.totales?.totalEmitidos ?? 0
     }
   }
-  const g = data.value.porGrado[gradoSel.value as number]
-  return { totalAlumnos: g?.totalAlumnos || 0, totalEmitidos: g?.emitidos || 0 }
+  const g = data.value.porGrado?.[gradoSel.value as number]
+  return {
+    totalAlumnos: g?.totalAlumnos ?? 0,
+    totalEmitidos: g?.emitidos ?? 0
+  }
 })
 
 const serieBase = computed<PorLista[]>(() => {
   if (!data.value) return []
   const base = (gradoSel.value === 'general')
-    ? data.value.totales.porLista
-    : (data.value.porGrado[gradoSel.value as number]?.porLista || [])
+    ? (data.value.totales?.porLista ?? [])
+    : (data.value.porGrado?.[gradoSel.value as number]?.porLista ?? [])
 
-  // ← NUEVO: ocultar “voto en blanco” si no está permitido
-  return ALLOW_BLANK ? base : base.filter(r => r.nombre?.toLowerCase() !== 'voto en blanco')
+  // ocultar “voto en blanco” si no está permitido
+  return ALLOW_BLANK ? base : base.filter(r => (r?.nombre || '').toLowerCase() !== 'voto en blanco')
 })
 
 // Ordenar desc, barra animada
-const series = computed(() =>
-  [...serieBase.value].sort((a,b) => b.conteo - a.conteo)
-)
+const series = computed(() => [...serieBase.value].sort((a,b) => (b?.conteo ?? 0) - (a?.conteo ?? 0)))
 
-const maxConteo = computed(() => Math.max(1, ...series.value.map(s => s.conteo)))
-const barWidth = (v:number) => Math.round((v / maxConteo.value) * 100)
+const maxConteo = computed(() => {
+  const arr = series.value.map(s => Number(s?.conteo ?? 0))
+  const m = Math.max(1, ...(arr.length ? arr : [1]))
+  return Number.isFinite(m) ? m : 1
+})
+const barWidth = (v:number) => Math.round((Number(v) / maxConteo.value) * 100)
 
 const porcentaje = (parte:number, total:number) => {
-  if (!total) return 0
-  return Math.round((parte/total)*100)
+  const p = Number(parte), t = Number(total)
+  if (!t || !Number.isFinite(p) || !Number.isFinite(t)) return 0
+  return Math.round((p/t)*100)
 }
 
-// Dispara la animación reiniciando variable CSS
-const animateNow = () => {
+// =====================
+// Animación
+// =====================
+const animateNow = async () => {
+  // Espera al próximo tick para asegurar que .bar-fill ya existe en el DOM
+  await nextTick()
   const els = document.querySelectorAll<HTMLElement>('.bar-fill')
   els.forEach(el => {
     el.style.animation = 'none'
-    // force reflow
-    void el.offsetWidth
+    void el.offsetWidth // reflow
     el.style.animation = ''
   })
 }
@@ -163,7 +248,10 @@ const animateNow = () => {
 .res-shell{ width:min(1500px, 96%); margin: 36px 0; }
 
 /* Header */
-.hero{ position:relative; background:linear-gradient(90deg,#167b77,#267bbb); color:#fff; border-radius:18px; padding:16px 18px 56px; box-shadow:0 18px 48px rgba(0,0,0,.18); }
+.hero{
+  position:relative; background:linear-gradient(90deg,#167b77,#267bbb); color:#fff;
+  border-radius:18px; padding:16px 18px 56px; box-shadow:0 18px 48px rgba(0,0,0,.18);
+}
 .hero-top{ display:flex; justify-content:space-between; align-items:center; gap:12px; }
 .brand{ display:flex; align-items:center; gap:10px; }
 .badge{ width:34px; height:34px; display:inline-grid; place-items:center; background:#ffffff22; border:1px solid #ffffff55; border-radius:10px; }
@@ -177,6 +265,12 @@ const animateNow = () => {
 
 /* Contenido */
 .content{ margin-top:18px; }
+
+/* Alert */
+.alert{
+  background:#fff7ed; border:1px solid #fed7aa; color:#7c2d12;
+  padding:10px 12px; border-radius:10px; margin-bottom:10px; font-weight:600;
+}
 
 /* Tabs */
 .tabs{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
@@ -215,7 +309,6 @@ const animateNow = () => {
   border-right: 1px solid #0ea5e9;
   transform-origin:left center;
   animation: grow .75s ease forwards;
-  /* pequeño desfase entre barras para efecto “escalonado” */
   animation-delay: calc(var(--idx) * 50ms);
 }
 @keyframes grow{
