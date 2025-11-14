@@ -9,7 +9,9 @@ type Voto = {
   seccion: string
   candidato_id: number | null
   en_blanco: boolean
-  created_at: string
+  // En BD existe creado_en; internamente normalizaremos a created_at
+  created_at?: string | null
+  creado_en?: string | null
 }
 type Alumno = { dni: string; grado: any; seccion: string }
 type Candidato = { id: number; nombre: string }
@@ -80,11 +82,11 @@ export default defineEventHandler(async () => {
 
     // === Catálogos ===
     const candQ = await supa.from('candidatos').select('id,nombre')
-    if (candQ.error) return { ok: false, msg: 'Error leyendo candidatos' }
+    if (candQ.error) return { ok: false, msg: `Error leyendo candidatos: ${candQ.error.message}` }
     const candidatos = (candQ.data || []) as Candidato[]
 
     const alQ = await supa.from('alumnos').select('dni,grado,seccion')
-    if (alQ.error) return { ok: false, msg: 'Error leyendo alumnos' }
+    if (alQ.error) return { ok: false, msg: `Error leyendo alumnos: ${alQ.error.message}` }
     const alumnos = (alQ.data || []) as Alumno[]
     const alumnosN = alumnos.map((a) => ({ ...a, grado: toNum(a.grado) }))
     const totalAlumnos = alumnosN.length
@@ -95,14 +97,40 @@ export default defineEventHandler(async () => {
       totalAlumnosPorGrado[g] = alumnosN.filter((a) => a.grado === g).length
     }
 
-    // === Votos (ordenados) ===
-    const vtQ = await supa
+    // === Votos (ordenados por creado_en; tolerante a esquema) ===
+    let votos: Voto[] = []
+    let vtQ = await supa
       .from('votos')
-      .select('dni,grado,seccion,candidato_id,en_blanco,created_at')
-      .order('created_at', { ascending: true })
-    if (vtQ.error) return { ok: false, msg: 'Error leyendo votos' }
-    const votos = (vtQ.data || []) as Voto[]
-    const votosN = votos.map((v) => ({ ...v, grado: toNum(v.grado) }))
+      .select('dni,grado,seccion,candidato_id,en_blanco,creado_en')
+      .order('creado_en', { ascending: true })
+
+    if (vtQ.error) {
+      // Tabla no existe
+      if (vtQ.error.code === '42P01') {
+        return buildZeroPayload(totalAlumnos, alumnosN, candidatos, BLOCK)
+      }
+      // Falta columna (no debería pasar con tu esquema actual), intentamos sin order
+      if (vtQ.error.code === '42703') {
+        vtQ = await supa
+          .from('votos')
+          .select('dni,grado,seccion,candidato_id,en_blanco,creado_en')
+        if (vtQ.error) {
+          return { ok: false, msg: `Error leyendo votos: ${vtQ.error.message}` }
+        }
+        votos = (vtQ.data || []) as Voto[]
+      } else {
+        return { ok: false, msg: `Error leyendo votos: ${vtQ.error.message}` }
+      }
+    } else {
+      votos = (vtQ.data || []) as Voto[]
+    }
+
+    // Normaliza grado y expone created_at desde creado_en (por compatibilidad interna)
+    const votosN = votos.map((v) => ({
+      ...v,
+      grado: toNum(v.grado),
+      created_at: v.created_at ?? v.creado_en ?? null,
+    }))
 
     // === CLAMP general + desbloqueo final ===
     const totalEmitidosLive = votosN.length
@@ -116,7 +144,7 @@ export default defineEventHandler(async () => {
     const porGradoClamped: any = {}
     for (const g of GRADOS) {
       const alG = alumnosN.filter((a) => a.grado === g)
-      const vtG = votosN.filter((v) => v.grado === g)
+      const vtG = votosN.filter((v) => toNum(v.grado) === g)
       const isFinalG = alG.length > 0 && vtG.length >= alG.length
       const cutoffG = isFinalG ? vtG.length : Math.floor(vtG.length / BLOCK) * BLOCK
       const vtGK = vtG.slice(0, cutoffG)
@@ -180,23 +208,23 @@ export default defineEventHandler(async () => {
       return payloadClamped
     }
 
-    // === NUEVO: si no hay nuevo múltiplo, devolvemos snapshot *inyectando* los totales actuales de alumnos
+    // === Si no hay nuevo múltiplo, devolvemos snapshot parcheando totales actuales de alumnos
     if (snapQ.data?.payload) {
       const p = snapQ.data.payload as any
 
-      // Parcheamos totales generales
+      // Parche de totales generales
       const totalesPatched = {
         ...(p?.totales ?? {}),
-        totalAlumnos, // <-- inyecta total actual de alumnos
+        totalAlumnos,
       }
 
-      // Parcheamos totales por grado manteniendo emitidos/porLista del snapshot
+      // Parche por grado (inyecta total de alumnos actuales por grado)
       const porGradoPatched: any = {}
       for (const g of GRADOS) {
         const snapG = p?.porGrado?.[g] ?? {}
         porGradoPatched[g] = {
           ...snapG,
-          totalAlumnos: totalAlumnosPorGrado[g], // <-- inyecta total actual
+          totalAlumnos: totalAlumnosPorGrado[g],
         }
       }
 

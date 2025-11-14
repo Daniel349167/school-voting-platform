@@ -1,15 +1,4 @@
 <script setup lang="ts">
-/**
- * Cabina de votación:
- * - Profe elige grado+sección UNA VEZ.
- * - Bucle: DNI -> verificar -> votar -> modal de éxito -> auto reset a DNI.
- * - UI: cabecera con onda, tarjetas interactivas, modal con confeti.
- * - Cambios:
- *   • Logo del colegio en vez del emoji.
- *   • Nombre del colegio centrado sobre la onda.
- *   • Imágenes para las 2 primeras listas; genérica para el resto; imagen para “voto en blanco”.
- *   • Las imágenes se muestran completas (object-fit: contain) y no recortadas.
- */
 const router = useRouter()
 
 // === Flag "Voto en blanco" desde runtimeConfig ===
@@ -24,37 +13,26 @@ onMounted(async () => {
   const { data } = await useFetch('/api/session')
   if (!data.value?.ok || data.value?.role !== 'aperturador') {
     router.replace('/login')
+    return
   }
+  // carga estadísticas generales al entrar
+  await loadEstadoAll()
 })
 
-// === Estado de conteos (votaron / faltan / total) ===
-const estado = reactive({ total: 0, votaron: 0, faltan: 0 })
-
-const loadEstado = async () => {
-  if (!grado.value || !seccion.value) return
-  const res = await $fetch('/api/votos/estado', {
-    method: 'GET',
-    query: { grado: String(grado.value), seccion: seccion.value }
-  }).catch(() => ({ ok: false }))
-
-  if (res?.ok) {
-    estado.total   = res.total
-    estado.votaron = res.votaron
-    estado.faltan  = res.faltan
-  }
+// ===== Tipos =====
+type Alumno = {
+  dni: string
+  nombres: string
+  apellidos: string
+  grado?: number | string
+  seccion?: string
+  ya_voto: boolean
+  en_colegio?: boolean
 }
-
-type Alumno = { dni: string; nombres: string; apellidos: string; grado: number; seccion: string; ya_voto: boolean }
-// imagen pasa a ser opcional; la completamos nosotros según el índice
 type Candidato = { id: number; nombre: string; descripcion?: string; imagen?: string }
 
-const step = ref<'salon'|'dni'|'votar'>('salon')
-
-const grados = [1,2,3,4,5]
-
-// salón
-const grado = ref<number | ''>('')
-const seccion = ref('')
+// ===== Estado UI =====
+const step = ref<'dni'|'votar'>('dni')
 
 // votación
 const dni = ref('')
@@ -65,31 +43,23 @@ const elegido = ref<number | 'blanco' | null>(null)
 const error = ref('')
 const loading = ref(false)
 
+// === Estado de conteos GENERALES (todos los grados) ===
+const estado = reactive({ total: 0, votaron: 0, faltan: 0 })
+
+const loadEstadoAll = async () => {
+  const res = await $fetch('/api/votos/estado', {
+    method: 'GET',
+  }).catch(() => ({ ok: false }))
+  if (res?.ok) {
+    estado.total   = res.total
+    estado.votaron = res.votaron
+    estado.faltan  = res.faltan
+  }
+}
+
 // UI helpers
 const dniInput = ref<HTMLInputElement|null>(null)
 const showModal = ref(false)
-
-
-// Secciones dinámicas desde la BD:
-const secciones = ref<string[]>([])
-
-// Cuando cambia el grado, pedimos las secciones reales a la API y reseteamos la selección
-watch(grado, async (g) => {
-  seccion.value = ''
-  secciones.value = []
-  if (!g) return
-  const res = await $fetch('/api/salones/secciones', {
-    method: 'GET',
-    query: { grado: String(g) }
-  }).catch(() => ({ ok: false }))
-
-  if (res?.ok) {
-    secciones.value = res.secciones
-  } else {
-    // si falla, puedes dejar vacío o algún fallback
-    secciones.value = []
-  }
-})
 
 // genera “confeti” simple
 const confetti = ref(Array.from({length: 22}).map(() => ({
@@ -100,49 +70,44 @@ const confetti = ref(Array.from({length: 22}).map(() => ({
 })))
 
 // Rutas de imágenes (coloca los archivos en /public/img/…)
-const IMG_LOGO          = '/img/logo-3045.png'
-const IMG_LISTA_1       = '/img/lista-1.png'        // imagen para la 1.ª lista
-const IMG_LISTA_2       = '/img/lista-2.png'        // imagen para la 2.ª lista
-const IMG_LISTA_GENERIC = '/img/lista-generic.png' // fallback si hay 3+ listas
-const IMG_VOTO_BLANCO   = '/img/voto-blanco.png'   // imagen del voto en blanco
+const IMG_LOGO          = '/img/logo-8161.png'
+const IMG_LISTA_1       = '/img/lista-1.png'
+const IMG_LISTA_2       = '/img/lista-2.png'
+const IMG_LISTA_GENERIC = '/img/lista-generic.png'
+const IMG_VOTO_BLANCO   = '/img/voto-blanco.png'
 
-const continuarSalon = () => {
-  error.value = ''
-  if (!grado.value || !seccion.value) { error.value = 'Elige grado y sección.'; return }
-  step.value = 'dni'
-  loadEstado()
-  nextTick(() => dniInput.value?.focus())
-}
+// ===== Lógica =====
 
-const cambiarSalon = () => {
-  step.value = 'salon'
-  alumno.value = null
-  candidatos.value = []
-  elegido.value = null
-  dni.value = ''
-  error.value = ''
+// Normaliza a mayúsculas al escribir (para que el backend compare consistente)
+const onDniInput = (e: Event) => {
+  const el = e.target as HTMLInputElement
+  el.value = el.value.toUpperCase()
+  dni.value = el.value
 }
 
 const verificarDNI = async () => {
   error.value = ''
   if (!dni.value.trim()) { error.value = 'Ingresa el DNI.'; return }
   loading.value = true
+
   const dniNorm = dni.value.trim().toUpperCase()
+
+  // Ya NO enviamos grado/sección
   const res = await $fetch('/api/votos/verificar', {
     method:'POST',
-    
-    body:{ dni: dniNorm, grado: grado.value, seccion: seccion.value }
-
+    body:{ dni: dniNorm }
   }).catch(() => ({ ok:false, msg:'Error de verificación' }))
   loading.value = false
 
   if (!res?.ok) { error.value = res?.msg || 'No se pudo verificar.'; return }
+  if (res.alumno?.en_colegio === false) { error.value = 'No estás registrado en el padrón del colegio.'; return }
+  if (res.alumno?.ya_voto) { error.value = 'Este DNI ya emitió su voto.'; return }
 
   alumno.value = res.alumno
 
-  // Asigna imágenes: primeras 2 listas con imágenes específicas, el resto genérica
+  // Asigna imágenes a las listas
   const imgsByIndex = [IMG_LISTA_1, IMG_LISTA_2]
-  candidatos.value = (res.candidatos as Candidato[]).map((c, idx) => ({
+  candidatos.value = (res.candidatos as Candidato[]).map((c: Candidato, idx: number) => ({
     ...c,
     imagen: imgsByIndex[idx] ?? IMG_LISTA_GENERIC
   }))
@@ -154,32 +119,31 @@ const verificarDNI = async () => {
 const emitirVoto = async () => {
   error.value = ''
 
-   if (!allowVotoBlanco.value && elegido.value === 'blanco') {
+  if (!allowVotoBlanco.value && elegido.value === 'blanco') {
     error.value = 'El voto en blanco está deshabilitado por la institución.'
     return
   }
-
   if (elegido.value === null) { error.value = 'Selecciona una opción.'; return }
+
   loading.value = true
   const dniNorm = dni.value.trim().toUpperCase()
+
+  // Ya NO enviamos grado/sección
   const res = await $fetch('/api/votos/emitir', {
     method:'POST',
     body:{
       dni: dniNorm,
-      grado: grado.value,
-      seccion: seccion.value,
       candidatoId: (elegido.value === 'blanco' ? null : elegido.value),
       enBlanco: elegido.value === 'blanco'
     }
-
   }).catch(() => ({ ok:false, msg:'No se pudo votar' }))
   loading.value = false
 
   if (!res?.ok) { error.value = res?.msg || 'No se pudo votar.'; return }
 
-  // 🎉 Modal bonito + confeti; luego volver a DNI
+  // 🎉 Modal bonito + confeti; luego volver a DNI y refrescar estadísticas generales
   showModal.value = true
-  setTimeout(() => {
+  setTimeout(async () => {
     showModal.value = false
     dni.value = ''
     alumno.value = null
@@ -187,14 +151,9 @@ const emitirVoto = async () => {
     elegido.value = null
     error.value = ''
     step.value = 'dni'
-    loadEstado()
+    await loadEstadoAll()
     nextTick(() => dniInput.value?.focus())
-  }, 2200) // dura ~2.2s
-}
-
-const logout = async () => {
-  await $fetch('/api/logout', { method:'POST' }).catch(() => ({}))
-  router.replace('/login')
+  }, 2200)
 }
 </script>
 
@@ -206,25 +165,19 @@ const logout = async () => {
         <div class="hero">
           <div class="hero-top">
             <div class="brand">
-              <!-- Logo (reemplaza mochilita) -->
+              <!-- Logo -->
               <img :src="IMG_LOGO" alt="I.E. 3045" class="brand-logo" />
               <div>
                 <h1>Votación Escolar</h1>
-                <p class="muted">
-                  <template v-if="step !== 'salon'">Salón: <b>{{ grado }}° {{ seccion }}</b> · </template>
-                  Sesión abierta por el profesor
-                </p>
+                <p class="muted">Sesión abierta por el profesor</p>
               </div>
             </div>
-            <div class="header-actions">
-              <button class="btn ghost" @click="cambiarSalon" v-if="step !== 'salon'">Cambiar salón</button>
-              <button class="btn" @click="logout">Cerrar sesión</button>
-            </div>
+            <!-- (Eliminado) header-actions: Cambiar salón / Cerrar sesión -->
           </div>
 
           <!-- Nombre del colegio centrado sobre la onda -->
           <div class="school-name">
-            I.E. 3045 “José Carlos Mariátegui La Chira”
+            I.E. 8161 “MANUEL SCORZA TORRE”
           </div>
 
           <!-- Onda -->
@@ -235,33 +188,9 @@ const logout = async () => {
 
         <!-- Contenido -->
         <div class="content-area" :class="{ votar: step === 'votar' }">
-          <!-- Paso 1: salón -->
-          <section v-if="step==='salon'" class="section">
-            <h2 class="step">1) Elige el salón</h2>
-            <div class="form-row">
-              <div>
-                <label>Grado</label>
-                <select v-model="grado">
-                  <option value="">— seleccionar —</option>
-                  <option v-for="g in grados" :key="g" :value="g">{{ g }}°</option>
-                </select>
-              </div>
-              <div>
-                <label>Sección</label>
-                <select v-model="seccion" :disabled="!grado || !secciones.length">
-                  <option value="">— seleccionar —</option>
-                  <option v-for="s in secciones" :key="s" :value="s">{{ s }}</option>
-                </select>
-              </div>
-            </div>
-            <div class="actions">
-              <button class="btn primary" @click="continuarSalon">Continuar</button>
-            </div>
-          </section>
-
-          <!-- Paso 2: DNI -->
-          <section v-else-if="step==='dni'" class="section dni-step">
-            <h2 class="step">2) Ingresa tu DNI</h2>
+          <!-- Paso: DNI -->
+          <section v-if="step==='dni'" class="section dni-step">
+            <h2 class="step">1) Ingresa tu DNI</h2>
 
             <div class="dni-grid">
               <!-- Panel principal con el input -->
@@ -273,11 +202,12 @@ const logout = async () => {
                 <div class="dni-input-row">
                   <input
                     ref="dniInput"
-                    class="text-input lg"
+                    class="text-input lg dni-upper"
                     v-model="dni"
                     placeholder="DNI"
-                    inputmode="numeric"
+                    inputmode="text"
                     autocomplete="off"
+                    @input="onDniInput"
                     @keyup.enter="verificarDNI"
                   />
                   <button class="btn primary lg" @click="verificarDNI" :disabled="loading">
@@ -288,11 +218,11 @@ const logout = async () => {
                 <p class="dni-hint">Asegúrate de no dejar espacios ni guiones.</p>
               </div>
 
-              <!-- Tarjeta lateral con los KPIs -->
+              <!-- Tarjeta lateral con los KPIs GENERALES -->
               <aside class="stats-card">
                 <div class="stats-header">
-                  <span class="stats-chip">Salón</span>
-                  <div class="stats-room">{{ grado }}° {{ seccion }}</div>
+                  <span class="stats-chip">General</span>
+                  <div class="stats-room">Todos los grados</div>
                 </div>
 
                 <div class="stats-grid">
@@ -313,7 +243,7 @@ const logout = async () => {
             </div>
           </section>
 
-          <!-- Paso 3: Votar -->
+          <!-- Paso: Votar -->
           <section v-else-if="step==='votar'" class="section">
             <div class="voter">
               <!-- Avatar genérico -->
@@ -324,11 +254,11 @@ const logout = async () => {
               </svg>
               <div class="voter-info">
                 <div class="who">{{ alumno!.apellidos }} {{ alumno!.nombres }}</div>
-                <div class="meta">{{ alumno!.grado }}° {{ alumno!.seccion }}</div>
+                <div class="meta">{{ alumno.grado }}° {{ alumno.seccion }}</div>
               </div>
             </div>
 
-            <h2 class="step">3) Elige tu lista</h2>
+            <h2 class="step">2) Elige tu lista</h2>
             <div class="cards">
               <label v-for="c in candidatos" :key="c.id" class="card">
                 <input type="radio" name="opc" :value="c.id" v-model="elegido" />
@@ -359,12 +289,11 @@ const logout = async () => {
                   <div class="desc">No elijo ninguna lista</div>
                 </div>
               </label>
-
             </div>
 
             <div class="actions">
               <button class="btn success" @click="emitirVoto" :disabled="loading">
-                {{ loading ? 'Registrando…' : 'Emitir voto' }}
+                {{ loading ? 'Registrando…' : 'VOTAR' }}
               </button>
               <button class="btn ghost" @click="step='dni'">Atrás</button>
             </div>
@@ -448,7 +377,6 @@ const logout = async () => {
 }
 h1{margin:0;font-size:22px}
 .muted{margin:2px 0 0;opacity:.9;font-size:13.8px}
-.header-actions{display:flex;gap:8px;flex-wrap:wrap}
 
 /* Nombre del colegio centrado encima de la onda */
 .school-name{
@@ -481,15 +409,15 @@ h1{margin:0;font-size:22px}
 .section{margin-top:6px}
 .step{margin:.2rem 0 .7rem;font-size:18px}
 
-/* Form */
-.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-@media (max-width:820px){.form-row{grid-template-columns:1fr}}
+/* Inputs */
 label{display:block;margin-bottom:6px;color:#334155;font-weight:600}
-select,.text-input{
+.text-input{
   width:100%;background:#f8fafc;border:1px solid #d9e2ec;border-radius:12px;
   padding:12px 12px;font-size:15.5px;outline:none;transition:.15s;
 }
-select:focus,.text-input:focus{box-shadow:0 0 0 3px #c7e6ff;border-color:#60a5fa;background:#fff}
+.text-input:focus{box-shadow:0 0 0 3px #c7e6ff;border-color:#60a5fa;background:#fff}
+.text-input.lg{ padding:14px 14px; font-size:16.5px; border-radius:12px; }
+.dni-upper { text-transform: uppercase; }
 
 /* Botones */
 .btn{background:#0ea5e9;border:none;color:#fff;padding:10px 16px;border-radius:10px;cursor:pointer;font-size:14.5px;font-weight:700}
@@ -497,6 +425,74 @@ select:focus,.text-input:focus{box-shadow:0 0 0 3px #c7e6ff;border-color:#60a5fa
 .btn.primary{background:#2563eb}
 .btn.success{background:#16a34a}
 .btn.ghost{background:#e8eef6;color:#0f172a}
+
+/* ===== Paso DNI ===== */
+.dni-step .step{ margin-top: 6px; }
+.dni-grid{
+  display:grid;
+  grid-template-columns: 1.4fr .9fr; /* panel + KPIs generales */
+  gap:16px;
+  align-items: stretch;
+}
+@media (max-width: 1020px){ .dni-grid{ grid-template-columns: 1fr; } }
+
+.dni-panel{
+  position: relative;
+  border-radius: 16px;
+  background: linear-gradient(180deg,#ffffff 0%, #f8fafc 100%);
+  border:1px solid #e6eef7;
+  box-shadow: 0 14px 32px rgba(15,23,42,.08);
+  padding:18px 18px 20px;
+  overflow: hidden;
+}
+.dni-panel::before{
+  content:"";
+  position:absolute; inset:0 0 auto 0; height:4px;
+  background: linear-gradient(90deg,#22c55e,#3b82f6,#06b6d4);
+  opacity:.65;
+}
+.dni-panel-head{ margin-bottom:12px; }
+.dni-title{ margin:0; font-size:18px; font-weight:800; color:#0f172a; }
+.dni-sub{ margin:.2rem 0 0; color:#475569; font-size:13.8px; }
+
+.dni-input-row{ display:flex; gap:10px; align-items:center; }
+.btn.lg{ padding:12px 18px; font-size:15.5px; border-radius:12px; }
+
+.dni-hint{ margin:.55rem 0 0; color:#64748b; font-size:12.8px; }
+
+/* KPIs */
+.stats-card{
+  border-radius: 16px;
+  background: radial-gradient(120% 120% at 0% 0%, #e0f2fe 0%, #fff 55%),
+              linear-gradient(180deg,#ffffff 0%, #f8fafc 100%);
+  border:1px solid #dbe7f3;
+  box-shadow: 0 14px 32px rgba(2, 132, 199, .08);
+  padding:16px;
+  display:grid;
+  grid-template-rows: auto 1fr;
+  gap:12px;
+}
+.stats-header{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.stats-chip{
+  font-size:12px; font-weight:800; color:#2563eb; background:#e0e7ff;
+  padding:4px 8px; border-radius:999px;
+}
+.stats-room{ font-weight:800; color:#0f172a; }
+
+.stats-grid{ display:grid; gap:10px; grid-template-columns: repeat(3, 1fr); }
+.stat.item{
+  border-radius:12px;
+  background:#ffffff;
+  border:1px solid #e6eef7;
+  text-align:center;
+  padding:10px 8px;
+}
+.stat.item .kpi{ font-weight:900; font-size:22px; color:#0f172a; line-height:1; }
+.stat.item .lbl{ font-size:12.5px; color:#475569; margin-top:2px; }
+
+.stat.item.ok{ background:#f0fdf4; border-color:#dcfce7; }
+.stat.item.wait{ background:#fff7ed; border-color:#ffedd5; }
+.stat.item.total{ background:#f1f5f9; border-color:#e2e8f0; }
 
 /* Votante */
 .voter{display:flex;align-items:center;gap:12px;margin-bottom:10px}
@@ -521,9 +517,9 @@ select:focus,.text-input:focus{box-shadow:0 0 0 3px #c7e6ff;border-color:#60a5fa
 .card:hover{transform:translateY(-2px);box-shadow:0 10px 22px rgba(0,0,0,.08)}
 .card input{display:none}
 
-/* NUEVO: contenedor de imagen que NO recorta (contain) */
+/* contenedor de imagen que NO recorta (contain) */
 .card-img{
-  height: 220px;                /* alto consistente */
+  height: 220px;
   background:#ffffff;
   display:flex;align-items:center;justify-content:center;
   border-bottom:1px solid #eef2f7;
@@ -531,7 +527,7 @@ select:focus,.text-input:focus{box-shadow:0 0 0 3px #c7e6ff;border-color:#60a5fa
 .card-img img{
   max-width:100%;
   max-height:100%;
-  object-fit:contain;           /* se ve completa */
+  object-fit:contain;
 }
 
 .card-body{padding:14px 14px 16px;display:grid;gap:6px}
@@ -615,73 +611,4 @@ select:focus,.text-input:focus{box-shadow:0 0 0 3px #c7e6ff;border-color:#60a5fa
 /* Transiciones */
 .fade-enter-active,.fade-leave-active{transition:opacity .2s ease}
 .fade-enter-from,.fade-leave-to{opacity:0}
-
-/* ===== Paso DNI ===== */
-.dni-step .step{ margin-top: 6px; }
-.dni-grid{
-  display:grid;
-  grid-template-columns: 1.4fr .9fr;
-  gap:16px;
-  align-items: stretch;
-}
-@media (max-width: 1020px){ .dni-grid{ grid-template-columns: 1fr; } }
-
-.dni-panel{
-  position: relative;
-  border-radius: 16px;
-  background: linear-gradient(180deg,#ffffff 0%, #f8fafc 100%);
-  border:1px solid #e6eef7;
-  box-shadow: 0 14px 32px rgba(15,23,42,.08);
-  padding:18px 18px 20px;
-  overflow: hidden;
-}
-.dni-panel::before{
-  content:"";
-  position:absolute; inset:0 0 auto 0; height:4px;
-  background: linear-gradient(90deg,#22c55e,#3b82f6,#06b6d4);
-  opacity:.65;
-}
-.dni-panel-head{ margin-bottom:12px; }
-.dni-title{ margin:0; font-size:18px; font-weight:800; color:#0f172a; }
-.dni-sub{ margin:.2rem 0 0; color:#475569; font-size:13.8px; }
-
-.dni-input-row{ display:flex; gap:10px; align-items:center; }
-.text-input.lg{ padding:14px 14px; font-size:16.5px; border-radius:12px; }
-.btn.lg{ padding:12px 18px; font-size:15.5px; border-radius:12px; }
-
-.dni-hint{ margin:.55rem 0 0; color:#64748b; font-size:12.8px; }
-
-/* KPIs */
-.stats-card{
-  border-radius: 16px;
-  background: radial-gradient(120% 120% at 0% 0%, #e0f2fe 0%, #fff 55%),
-              linear-gradient(180deg,#ffffff 0%, #f8fafc 100%);
-  border:1px solid #dbe7f3;
-  box-shadow: 0 14px 32px rgba(2, 132, 199, .08);
-  padding:16px;
-  display:grid;
-  grid-template-rows: auto 1fr;
-  gap:12px;
-}
-.stats-header{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
-.stats-chip{
-  font-size:12px; font-weight:800; color:#2563eb; background:#e0e7ff;
-  padding:4px 8px; border-radius:999px;
-}
-.stats-room{ font-weight:800; color:#0f172a; }
-
-.stats-grid{ display:grid; gap:10px; grid-template-columns: repeat(3, 1fr); }
-.stat.item{
-  border-radius:12px;
-  background:#ffffff;
-  border:1px solid #e6eef7;
-  text-align:center;
-  padding:10px 8px;
-}
-.stat.item .kpi{ font-weight:900; font-size:22px; color:#0f172a; line-height:1; }
-.stat.item .lbl{ font-size:12.5px; color:#475569; margin-top:2px; }
-
-.stat.item.ok{ background:#f0fdf4; border-color:#dcfce7; }
-.stat.item.wait{ background:#fff7ed; border-color:#ffedd5; }
-.stat.item.total{ background:#f1f5f9; border-color:#e2e8f0; }
 </style>

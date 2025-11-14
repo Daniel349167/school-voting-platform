@@ -30,7 +30,7 @@
       <table>
         <thead>
           <tr>
-            <th>DNI o Código</th>
+            <th>DNI</th>
             <th>Nombres</th>
             <th>Apellidos</th>
             <th>Grado</th>
@@ -99,22 +99,55 @@ const gradoToNum = (sRaw: any) => {
   return (v ?? Number.parseInt(s)) || 0
 }
 
-/** “APELLIDOS, NOMBRES” → { apellidos, nombres } */
-const splitNombre = (full: string) => {
-  const txt = String(full || '').trim()
-  if (!txt) return { apellidos: '', nombres: '' }
-  const parts = txt.split(',') // padrón: "APELLIDOS, NOMBRES"
-  if (parts.length >= 2) {
+  /** Separación inteligente:
+   * - 1 palabra → solo apellidos
+   * - 2 palabras → 1 apellido + 1 nombre
+   * - 3 palabras → 2 apellidos + 1 nombre
+   * - 4+ palabras → apellidos + últimos 2 nombres
+   */
+  const splitNombre = (full: string) => {
+    const txt = String(full || '').trim()
+    if (!txt) return { apellidos: '', nombres: '' }
+
+    // Caso con coma: "APELLIDOS, NOMBRES"
+    const parts = txt.split(',')
+    if (parts.length >= 2) {
+      return {
+        apellidos: parts[0].trim(),
+        nombres: parts.slice(1).join(',').trim(),
+      }
+    }
+
+    const tokens = txt.split(/\s+/)
+
+    if (tokens.length === 1) {
+      return { apellidos: txt, nombres: '' }
+    }
+
+    if (tokens.length === 2) {
+      return {
+        apellidos: tokens[0],
+        nombres: tokens[1],
+      }
+    }
+
+    if (tokens.length === 3) {
+      // FORMATO: APELLIDO PATERNO + APELLIDO MATERNO + NOMBRE
+      return {
+        apellidos: tokens.slice(0, 2).join(' '),   // 2 apellidos
+        nombres: tokens[2],                        // 1 nombre
+      }
+    }
+
+    // 4 o más palabras:
+    // apellidos = todo excepto las 2 últimas
+    // nombres = últimas 2 palabras
     return {
-      apellidos: parts[0].trim(),
-      nombres: parts.slice(1).join(',').trim(),
+      apellidos: tokens.slice(0, -2).join(' '),
+      nombres: tokens.slice(-2).join(' ')
     }
   }
-  // fallback
-  const tokens = txt.split(/\s+/)
-  if (tokens.length <= 1) return { apellidos: txt, nombres: '' }
-  return { apellidos: tokens.slice(0, -1).join(' '), nombres: tokens.slice(-1)[0] }
-}
+
 
 /** Normaliza el “código del estudiante” como string sin espacios extra */
 const normalizeCodigo = (v: any) => String(v ?? '').toString().trim()
@@ -168,22 +201,34 @@ const onFileChange = (e: Event) => {
 
     // Buscamos una fila que tenga al menos estas columnas del nuevo formato
     // GRADO | SECCIÓN | TIPO DE DOCUMENTO | NÚMERO DE DOCUMENTO | CÓDIGO DEL ESTUDIANTE | ESTUDIANTE
+    // Buscamos una fila que tenga al menos 2 columnas reconocibles del nuevo formato
     for (let i = 0; i < raw.length; i++) {
       const row = raw[i].map(c => normalizeKey(c))
+
       const hasGrado   = row.some(c => c === 'grado')
       const hasSeccion = row.some(c => c.startsWith('seccion'))
       const hasTipo    = row.some(c => c === 'tipo de documento' || c === 'documento')
       const hasNumDoc  = row.some(c => c === 'numero de documento' || c === 'dni')
-      const hasCodigo  = row.some(c => c === 'codigo del estudiante' || c === 'codigo')
       const hasEst     = row.some(c => c === 'estudiante')
-      if (hasGrado && hasSeccion && hasTipo && hasNumDoc && hasCodigo && hasEst) {
+
+      // contamos cuántas columnas válidas encontró
+      const hits = [
+        hasGrado,
+        hasSeccion,
+        hasTipo,
+        hasNumDoc,
+        hasEst
+      ].filter(Boolean).length
+
+      // si encuentra dos o más, esa fila es la cabecera
+      if (hits >= 2) {
         headerRowIndex = i
         break
       }
     }
 
     if (headerRowIndex === -1) {
-      error.value = 'No se encontró la fila de cabeceras válida (GRADO/SECCIÓN/TIPO/NÚMERO/CÓDIGO/ESTUDIANTE).'
+      error.value = 'No se encontró una fila de cabeceras válida.'
       return
     }
 
@@ -208,38 +253,74 @@ const onFileChange = (e: Event) => {
     }
 
     const mapped: Mapped[] = json.map((r) => {
-      // normalizamos keys para ser tolerantes a mayúsculas/acentos
-      const norm: Record<string, any> = {}
+    // normalizamos keys para ser tolerantes a mayúsculas/acentos/espacios
+    const norm: Record<string, any> = {}
+    for (const k of Object.keys(r)) {
+      norm[normalizeKey(k)] = r[k]
+    }
+
+    const gradoRaw   = r['GRADO'] ?? r['grado'] ?? norm['grado'] ?? ''
+    const seccionRaw = r['SECCIÓN'] ?? r['SECCION'] ?? r['sección'] ?? r['seccion'] ?? norm['seccion'] ?? ''
+    const tipoDocRaw =
+      r['TIPO DE DOCUMENTO'] ??
+      r['tipo de documento'] ??
+      r['DOCUMENTO'] ??
+      norm['tipo de documento'] ??
+      norm['documento'] ??
+      ''
+    const numDocRaw  =
+      r['NÚMERO DE DOCUMENTO'] ??
+      r['NUMERO DE DOCUMENTO'] ??
+      r['numero de documento'] ??
+      norm['numero de documento'] ??
+      norm['dni'] ??
+      ''
+    const codigoEst  =
+      r['CÓDIGO DEL ESTUDIANTE'] ??
+      r['CODIGO DEL ESTUDIANTE'] ??
+      r['codigo del estudiante'] ??
+      norm['codigo del estudiante'] ??
+      norm['codigo'] ??
+      ''
+
+    // 🔎 DETECCIÓN ROBUSTA DE LA COLUMNA DE NOMBRE DEL ESTUDIANTE
+    let estudiante: any =
+      r['ESTUDIANTE'] ??
+      r['estudiante'] ??
+      norm['estudiante'] ??
+      ''
+
+    // Si todavía está vacío, buscamos cualquier columna cuyo nombre normalizado contenga "estudiante"
+    if (!estudiante) {
       for (const k of Object.keys(r)) {
-        norm[normalizeKey(k)] = r[k]
+        const nk = normalizeKey(k)
+        if (nk.includes('estudiante')) {
+          estudiante = r[k]
+          break
+        }
       }
+    }
 
-      const gradoRaw   = r['GRADO'] ?? r['grado'] ?? norm['grado'] ?? ''
-      const seccionRaw = r['SECCIÓN'] ?? r['SECCION'] ?? r['sección'] ?? r['seccion'] ?? norm['seccion'] ?? ''
-      const tipoDocRaw = r['TIPO DE DOCUMENTO'] ?? r['tipo de documento'] ?? r['DOCUMENTO'] ?? norm['tipo de documento'] ?? norm['documento'] ?? ''
-      const numDocRaw  = r['NÚMERO DE DOCUMENTO'] ?? r['NUMERO DE DOCUMENTO'] ?? r['numero de documento'] ?? norm['numero de documento'] ?? norm['dni'] ?? ''
-      const codigoEst  = r['CÓDIGO DEL ESTUDIANTE'] ?? r['CODIGO DEL ESTUDIANTE'] ?? r['codigo del estudiante'] ?? norm['codigo del estudiante'] ?? norm['codigo'] ?? ''
-      const estudiante = r['ESTUDIANTE'] ?? r['estudiante'] ?? norm['estudiante'] ?? ''
+    const { apellidos, nombres } = splitNombre(String(estudiante || ''))
 
-      const { apellidos, nombres } = splitNombre(String(estudiante || ''))
+    const _tipoDoc = String(tipoDocRaw || '')
+    const _numDoc  = String(numDocRaw || '').trim()
+    const _codigo  = normalizeCodigo(codigoEst)
 
-      const _tipoDoc = String(tipoDocRaw || '')
-      const _numDoc  = String(numDocRaw || '').trim()
-      const _codigo  = normalizeCodigo(codigoEst)
+    return {
+      nombres: String(nombres || ''),
+      apellidos: String(apellidos || ''),
+      grado: gradoToNum(gradoRaw),
+      seccion: String(seccionRaw || '').toUpperCase().trim(),
+      _tipoDoc,
+      _numDoc,
+      _codigo,
+      _hasRealDni: hasRealDni(_tipoDoc, _numDoc),
+      // 'dni' se asignará en la fase 2 (deduplicación + generación)
+      dni: ''
+    }
+  })
 
-      return {
-        nombres: String(nombres || ''),
-        apellidos: String(apellidos || ''),
-        grado: gradoToNum(gradoRaw),
-        seccion: String(seccionRaw || '').toUpperCase().trim(),
-        _tipoDoc,
-        _numDoc,
-        _codigo,
-        _hasRealDni: hasRealDni(_tipoDoc, _numDoc),
-        // 'dni' se asignará en la fase 2 (deduplicación + generación)
-        dni: ''
-      }
-    })
 
     // 2) Deduplicar según regla y asignar identificador final
     const seenDni = new Set<string>()      // para quienes SÍ tienen DNI

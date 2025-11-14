@@ -1,35 +1,69 @@
 import { defineEventHandler, readBody } from 'h3'
 import { createClient } from '@supabase/supabase-js'
 
+type VerificarBody = {
+  dni: string
+}
+
 export default defineEventHandler(async (event) => {
-  const { dni, grado, seccion } = await readBody<{ dni: string; grado: number; seccion: string }>(event)
+  const { dni } = await readBody<VerificarBody>(event)
 
   const cfg = useRuntimeConfig()
   const supa = createClient(cfg.public.supabaseUrl, cfg.supabaseServiceRole)
 
-  if (!dni || !grado || !seccion) return { ok:false, msg:'Faltan datos.' }
+  if (!dni) {
+    return { ok: false, msg: 'Falta DNI.' }
+  }
 
-  // Alumno debe existir en ese salón y no haber votado
+  // Buscar alumno SOLO por DNI (padrón del colegio)
   const { data: al, error: e1 } = await supa
     .from('alumnos')
     .select('dni,nombres,apellidos,grado,seccion,ya_voto')
     .eq('dni', dni)
-    .eq('grado', String(grado))  // tu columna es text, comparamos como string
-    .eq('seccion', seccion)
     .maybeSingle()
 
-  if (e1) return { ok:false, msg:'Error consultando alumno.' }
-  if (!al) return { ok:false, msg:'No estás en este salón.' }
-  if (al.ya_voto) return { ok:false, msg:'Este DNI ya votó.' }
+  if (e1) {
+    return { ok: false, msg: 'Error consultando alumno.' }
+  }
 
-  // Candidatos activos
+  // Si no existe en el padrón -> en_colegio = false (frontend mostrará mensaje)
+  if (!al) {
+    return {
+      ok: true,
+      alumno: {
+        dni,
+        nombres: '',
+        apellidos: '',
+        ya_voto: false,
+        en_colegio: false
+      },
+      candidatos: []
+    }
+  }
+
+  // Si ya votó, devolvemos la marca para que el frontend bloquee
+  if (al.ya_voto) {
+    return {
+      ok: true,
+      alumno: { ...al, en_colegio: true }, // existe en padrón
+      candidatos: []
+    }
+  }
+
+  // Cargar candidatos activos
   const { data: cands, error: e2 } = await supa
     .from('candidatos')
     .select('id,nombre,descripcion')
     .eq('activo', true)
     .order('id', { ascending: true })
 
-  if (e2) return { ok:false, msg:'Error cargando candidatos.' }
+  if (e2) {
+    return { ok: false, msg: 'Error cargando candidatos.' }
+  }
 
-  return { ok:true, alumno: al, candidatos: cands || [] }
+  return {
+    ok: true,
+    alumno: { ...al, en_colegio: true },
+    candidatos: cands || []
+  }
 })

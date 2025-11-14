@@ -9,11 +9,11 @@ type Voto = {
   seccion: string
   candidato_id: number | null
   en_blanco: boolean
-  created_at: string
+  created_at?: string | null  // normalizamos desde creado_en
+  creado_en?: string | null
 }
 
-// ⬇️ AHORA incluimos nombres y apellidos para armar "Apellidos, Nombres"
-type Alumno = { dni: string; grado: any; seccion: string; nombres?: string; apellidos?: string }
+type Alumno = { dni: string; grado: any; seccion: string; nombres?: string | null; apellidos?: string | null }
 type Candidato = { id: number; nombre: string }
 
 const toNum = (v: any) => (Number.isFinite(Number(v)) ? Number(v) : 0)
@@ -108,25 +108,61 @@ export default defineEventHandler(async (event) => {
     .toLowerCase()
     .match(/^(si|sí|true|1|on)$/) !== null
 
-  // Catálogos
-  const { data: candidatos, error: eC } =
-    await supa.from('candidatos').select('id,nombre') as any
-  if (eC) return { ok: false, msg: 'No se pudo leer candidatos' }
+  // === Candidatos ===
+  let candidatos: Candidato[] = []
+  {
+    const q = await supa.from('candidatos').select('id,nombre') as any
+    if (q.error) return { ok: false, msg: `No se pudo leer candidatos: ${q.error.message}` }
+    candidatos = (q.data || []) as Candidato[]
+  }
 
-  // ⬇️ Traemos nombres y apellidos además de dni/grado/seccion
-  const { data: alumnos, error: eA } =
-    await supa.from('alumnos').select('dni,grado,seccion,nombres,apellidos') as any
-  if (eA) return { ok: false, msg: 'No se pudo leer alumnos' }
+  // === Alumnos (si faltan nombres/apellidos, sigue igual) ===
+  let alumnos: Alumno[] = []
+  {
+    let q = await supa.from('alumnos').select('dni,grado,seccion,nombres,apellidos') as any
+    if (q.error && q.error.code === '42703') {
+      q = await supa.from('alumnos').select('dni,grado,seccion') as any
+      if (q.error) return { ok: false, msg: `No se pudo leer alumnos: ${q.error.message}` }
+      alumnos = (q.data || []).map((a: any) => ({ ...a, nombres: null, apellidos: null })) as Alumno[]
+    } else if (q.error) {
+      return { ok: false, msg: `No se pudo leer alumnos: ${q.error.message}` }
+    } else {
+      alumnos = (q.data || []) as Alumno[]
+    }
+  }
 
-  // Votos EN TIEMPO REAL (sin bloques)
-  const { data: votos, error: eV } = await supa
-    .from('votos')
-    .select('dni,grado,seccion,candidato_id,en_blanco,created_at')
-    .order('created_at', { ascending: true }) as any
-  if (eV) return { ok: false, msg: 'No se pudo leer votos' }
+  // === Votos (usar creado_en y mapear a created_at) ===
+  let votos: Voto[] = []
+  {
+    let q = await supa
+      .from('votos')
+      .select('dni,grado,seccion,candidato_id,en_blanco,creado_en')
+      .order('creado_en', { ascending: true }) as any
+
+    if (q.error) {
+      if (q.error.code === '42P01') {
+        votos = []
+      } else if (q.error.code === '42703') {
+        q = await supa
+          .from('votos')
+          .select('dni,grado,seccion,candidato_id,en_blanco,creado_en') as any
+        if (q.error) return { ok: false, msg: `No se pudo leer votos: ${q.error.message}` }
+        votos = (q.data || []) as Voto[]
+      } else {
+        return { ok: false, msg: `No se pudo leer votos: ${q.error.message}` }
+      }
+    } else {
+      votos = (q.data || []) as Voto[]
+    }
+  }
 
   const alumnosN = (alumnos || []).map((a: Alumno) => ({ ...a, grado: toNum(a.grado) }))
-  const votosN = (votos || []).map((v: Voto) => ({ ...v, grado: toNum(v.grado) }))
+  const votosN = (votos || []).map((v: Voto) => ({
+    ...v,
+    grado: toNum(v.grado),
+    created_at: v.created_at ?? v.creado_en ?? null, // normaliza para usar en Excel
+  }))
+
   const totalAlumnos = alumnosN.length
 
   // 🔎 Mapa DNI → "Apellidos, Nombres"
@@ -170,6 +206,8 @@ export default defineEventHandler(async (event) => {
 
   // ==== POR GRADO Y SECCIÓN ====
   type Cont = { totalAlumnos: number, emitidos: number, porLista: Record<number, number> }
+
+  // Detalle por sección
   const porGS: Record<string, Cont> = {}  // key: `${g}|${sec}`
   // totales alumnos por sección
   for (const a of alumnosN) {
@@ -184,6 +222,23 @@ export default defineEventHandler(async (event) => {
     porGS[k].emitidos++
     const id = (v.en_blanco || v.candidato_id == null) ? keyBlanco : Number(v.candidato_id)
     porGS[k].porLista[id] = (porGS[k].porLista[id] || 0) + 1
+  }
+
+  // === RESUMEN POR GRADO (acumulado de todas las secciones) ===
+  const porG: Record<number, Cont> = {}
+  for (const g of GRADOS) {
+    porG[g] = { totalAlumnos: 0, emitidos: 0, porLista: {} }
+  }
+  for (const k of Object.keys(porGS)) {
+    const [gStr] = k.split('|')
+    const g = Number(gStr)
+    const box = porGS[k]
+    porG[g].totalAlumnos += box.totalAlumnos
+    porG[g].emitidos     += box.emitidos
+    for (const idStr of Object.keys(box.porLista)) {
+      const id = Number(idStr)
+      porG[g].porLista[id] = (porG[g].porLista[id] || 0) + box.porLista[id]
+    }
   }
 
   // ========== Excel ==========
@@ -201,7 +256,7 @@ export default defineEventHandler(async (event) => {
   ws1.columns = [
     { key: 'a', width: 28 },
     { key: 'b', width: 22 },
-    { key: 'c', width: 44 },  // más ancha para descripciones
+    { key: 'c', width: 44 },
     { key: 'd', width: 22 },
     { key: 'e', width: 20 },
     { key: 'f', width: 20 }
@@ -226,7 +281,7 @@ export default defineEventHandler(async (event) => {
   ws1.addRow([])
   headerRow(ws1, ['Indicador', 'Detalle', 'Notas', '', '', ''])
   const ganadorTexto = ganadores.length ? ganadores.join(', ') : 'Sin ganador aún'
-  const notaGanador = 'Cálculo en tiempo real' + (allowBlank ? ' (excluye voto en blanco)' : '')
+  const notaGanador = 'Cálculo en tiempo real' + (allowBlank ? ' (incluye o muestra blanco según config)' : '')
   ws1.addRow(['Ganador(es) virtual(es)', ganadorTexto, notaGanador, '', '', ''])
 
   ws1.addRow([])
@@ -259,7 +314,57 @@ export default defineEventHandler(async (event) => {
     { key: 'pg', width: 14 },
     { key: 'pp', width: 18 }
   ]
-  sheetTitle(ws2, 'Distribución por listas — detalle por grado y sección')
+  sheetTitle(ws2, 'Distribución por listas — resumen por grado y detalle por sección')
+
+  /* ========= Bloque A: RESUMEN POR GRADO (con celdas unificadas) ========= */
+  const subA = ws2.addRow(['', '', 'RESUMEN POR GRADO', '', '', '', ''])
+  subA.font = { bold: true }
+  ws2.addRow([])
+  headerRow(ws2, ['Grado', '', 'Lista', 'Votos', 'Emitidos (grado)', '% en grado', '% participación'])
+
+  for (const g of GRADOS) {
+    const box = porG[g]
+    if (!box) continue
+    const emG = box.emitidos
+    const totG = box.totalAlumnos
+
+    const idsG = [...Object.keys(allNames).map(Number)]
+      .filter(id => id !== keyBlanco)
+      .sort((a, b) => (box.porLista[b] || 0) - (box.porLista[a] || 0))
+
+    const start = ws2.lastRow?.number ?? 8
+
+    for (const id of idsG) {
+      const c = box.porLista[id] || 0
+      const r = ws2.addRow([`${g}°`, '', allNames[id], c, emG, emG ? c / emG : 0, totG ? emG / totG : 0])
+      r.getCell(4).numFmt = '0'
+      r.getCell(5).numFmt = '0'
+      r.getCell(6).numFmt = '0%'
+      r.getCell(7).numFmt = '0%'
+    }
+    if (allowBlank) {
+      const cb = box.porLista[keyBlanco] || 0
+      const rr = ws2.addRow([`${g}°`, '', nameBlanco, cb, emG, emG ? cb / emG : 0, totG ? emG / totG : 0])
+      rr.getCell(4).numFmt = '0'
+      rr.getCell(5).numFmt = '0'
+      rr.getCell(6).numFmt = '0%'
+      rr.getCell(7).numFmt = '0%'
+    }
+
+    // Unificar celdas E (Emitidos) y G (% participación) para este grado
+    const end = ws2.lastRow?.number ?? start
+    if (end > start) {
+      ws2.mergeCells(`E${start + 1}:E${end}`)
+      ws2.mergeCells(`G${start + 1}:G${end}`)
+    }
+
+    ws2.addRow([]) // separación entre grados
+  }
+
+  /* ========= Bloque B: DETALLE POR SECCIÓN (con celdas unificadas) ========= */
+  const subB = ws2.addRow(['', '', 'DETALLE POR SECCIÓN', '', '', '', ''])
+  subB.font = { bold: true }
+  ws2.addRow([])
   headerRow(ws2, ['Grado', 'Sección', 'Lista', 'Votos', 'Emitidos (sección)', '% en sección', '% participación'])
 
   const keys = Object.keys(porGS).sort((a, b) => {
@@ -278,6 +383,8 @@ export default defineEventHandler(async (event) => {
       .filter(id => id !== keyBlanco)
       .sort((a, b) => (box.porLista[b] || 0) - (box.porLista[a] || 0))
 
+    const start = ws2.lastRow?.number ?? 8
+
     for (const id of ids) {
       const c = box.porLista[id] || 0
       const r = ws2.addRow([`${g}°`, sec, allNames[id], c, em, em ? c / em : 0, totSec ? em / totSec : 0])
@@ -295,6 +402,13 @@ export default defineEventHandler(async (event) => {
       rr.getCell(7).numFmt = '0%'
     }
 
+    // Unificar celdas E (Emitidos) y G (% participación) para este bloque de sección
+    const end = ws2.lastRow?.number ?? start
+    if (end > start) {
+      ws2.mergeCells(`E${start + 1}:E${end}`)
+      ws2.mergeCells(`G${start + 1}:G${end}`)
+    }
+
     ws2.addRow([]) // separación visual
   }
 
@@ -302,21 +416,19 @@ export default defineEventHandler(async (event) => {
   const ws3 = wb.addWorksheet('Votos (detalle)')
   ws3.columns = [
     { key: 'dni', width: 14 },
-    // ⬇️ NUEVA COLUMNA "Nombres" (Apellidos, Nombres)
-    { key: 'nombres', width: 36 },
+    { key: 'nombres', width: 36 },   // "Apellidos, Nombres"
     { key: 'grado', width: 8 },
     { key: 'seccion', width: 8 },
     { key: 'fecha', width: 22 }
   ]
   sheetTitle(ws3, 'Listado de votos (orden cronológico)')
-  // ⬇️ Encabezados actualizados con "Nombres"
   headerRow(ws3, ['DNI', 'Nombres', 'Grado', 'Sección', 'Fecha (Lima)'])
 
   for (const v of votosN) {
     const nombre = nameByDni[v.dni] || '' // "Apellidos, Nombres" si existe
-    ws3.addRow([v.dni, nombre, v.grado, v.seccion, toLimaDate(v.created_at)])
+    const fecha = v.created_at ? toLimaDate(v.created_at) : ''
+    ws3.addRow([v.dni, nombre, v.grado, v.seccion, fecha])
   }
-  // ⬇️ Fecha ahora es la columna 5
   ws3.getColumn(5).numFmt = 'yyyy-mm-dd hh:mm:ss'
 
   // → Buffer y respuesta
@@ -326,7 +438,6 @@ export default defineEventHandler(async (event) => {
 
   setResponseHeaders(event, {
     'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    // filename* garantiza compatibilidad (y evita que el navegador cambie el nombre).
     'Content-Disposition': `attachment; filename="${fname}"; filename*=UTF-8''${encodeURIComponent(fname)}`
   })
   return buf
