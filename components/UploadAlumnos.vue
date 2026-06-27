@@ -3,7 +3,7 @@
     <label class="upload-label">Seleccionar archivo Excel/CSV</label>
     <input
       type="file"
-      accept=".xlsx,.xls,.csv"
+      accept=".xlsx,.csv"
       @change="onFileChange"
       class="upload-input"
     />
@@ -61,8 +61,6 @@
 </template>
 
 <script setup lang="ts">
-import * as XLSX from 'xlsx'
-
 const rows = ref<any[]>([])      // filas listas para enviar (normalizadas y deduplicadas)
 const allRows = ref<any[]>([])   // todas las filas leídas y mapeadas (antes de deduplicar)
 const preview = ref<any[]>([])
@@ -175,6 +173,51 @@ const hasRealDni = (tipoDoc: string, numDoc: string) => {
   return (tipo === 'dni' && !!dni)
 }
 
+const parseCsv = (text: string): string[][] => {
+  const result: string[][] = []
+  let row: string[] = []
+  let value = ''
+  let quoted = false
+
+  for (let index = 0; index < text.length; index++) {
+    const character = text[index]
+    const next = text[index + 1]
+    if (character === '"' && quoted && next === '"') {
+      value += '"'
+      index++
+    } else if (character === '"') {
+      quoted = !quoted
+    } else if (character === ',' && !quoted) {
+      row.push(value)
+      value = ''
+    } else if ((character === '\n' || character === '\r') && !quoted) {
+      if (character === '\r' && next === '\n') index++
+      row.push(value)
+      if (row.some(cell => cell.trim())) result.push(row)
+      row = []
+      value = ''
+    } else {
+      value += character
+    }
+  }
+  row.push(value)
+  if (row.some(cell => cell.trim())) result.push(row)
+  return result
+}
+
+const excelValue = (value: any): string => {
+  if (value == null) return ''
+  if (value instanceof Date) return value.toISOString()
+  if (typeof value === 'object') {
+    if ('result' in value && value.result != null) return String(value.result)
+    if ('text' in value && value.text != null) return String(value.text)
+    if ('richText' in value && Array.isArray(value.richText)) {
+      return value.richText.map(part => part.text).join('')
+    }
+  }
+  return String(value)
+}
+
 const onFileChange = (e: Event) => {
   error.value = ''
   success.value = false
@@ -189,14 +232,36 @@ const onFileChange = (e: Event) => {
   if (!file) return
 
   const reader = new FileReader()
-  reader.onload = (evt) => {
+  reader.onload = async (evt) => {
     const data = evt.target?.result
-    const workbook = XLSX.read(data as any, { type: 'binary' })
-    const sheetName = workbook.SheetNames[0]
-    const sheet = workbook.Sheets[sheetName]
+    if (!(data instanceof ArrayBuffer)) {
+      error.value = 'No se pudo leer el archivo.'
+      return
+    }
+
+    let raw: string[][]
+    try {
+      if (file.name.toLowerCase().endsWith('.csv')) {
+        raw = parseCsv(new TextDecoder('utf-8').decode(data))
+      } else {
+        const { default: ExcelJS } = await import('exceljs')
+        const workbook = new ExcelJS.Workbook()
+        await workbook.xlsx.load(data as any)
+        const sheet = workbook.worksheets[0]
+        if (!sheet) throw new Error('El archivo no contiene hojas')
+        raw = []
+        sheet.eachRow({ includeEmpty: true }, row => {
+          const values = Array.isArray(row.values) ? row.values.slice(1) : []
+          raw.push(values.map(value => excelValue(value)))
+        })
+      }
+    } catch (parseError) {
+      console.error(parseError)
+      error.value = 'No se pudo interpretar el archivo. Usa .xlsx o .csv.'
+      return
+    }
 
     // Leemos en crudo para detectar la fila de cabeceras REALES
-    const raw = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1, defval: '' }) as string[][]
     let headerRowIndex = -1
 
     // Buscamos una fila que tenga al menos estas columnas del nuevo formato
@@ -232,8 +297,11 @@ const onFileChange = (e: Event) => {
       return
     }
 
-    // Leemos como objetos desde esa fila
-    const json = XLSX.utils.sheet_to_json(sheet, { range: headerRowIndex, defval: '' }) as any[]
+    // Convertimos las filas posteriores en objetos usando la cabecera detectada.
+    const headers = raw[headerRowIndex].map(value => String(value || '').trim())
+    const json = raw.slice(headerRowIndex + 1)
+      .filter(row => row.some(value => String(value || '').trim()))
+      .map(row => Object.fromEntries(headers.map((header, index) => [header, row[index] ?? ''])))
 
     // 1) Mapear filas a estructura intermedia
     type Mapped = {
@@ -379,7 +447,7 @@ const onFileChange = (e: Event) => {
     }
   }
 
-  reader.readAsBinaryString(file)
+  reader.readAsArrayBuffer(file)
 }
 
 const enviar = async () => {

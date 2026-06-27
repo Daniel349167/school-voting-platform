@@ -1,75 +1,84 @@
-# Nuxt Minimal Starter
+# School Voting Platform
 
-Look at the [Nuxt documentation](https://nuxt.com/docs/getting-started/introduction) to learn more.
+Plataforma para digitalizar elecciones escolares, administrar alumnos por
+seccion, emitir votos y consultar resultados. Esta construida como aplicacion
+full stack con Nuxt 4, Vue 3, TypeScript y Supabase.
 
-## Setup
+## Funcionalidades
 
-Make sure to install dependencies:
+- Inicio de sesion y sesiones de docentes/administradores.
+- Importacion masiva de alumnos desde Excel.
+- Alta y eliminacion de alumnos.
+- Flujo de votacion con verificacion previa y control de voto emitido.
+- Opcion configurable de voto en blanco.
+- Avance de votacion por salon y consulta en tiempo real.
+- Resultados agregados y exportacion a Excel.
+- Separacion entre credenciales publicas y `service role` del servidor.
 
-```bash
-# npm
-npm install
+## Arquitectura
 
-# pnpm
-pnpm install
-
-# yarn
-yarn install
-
-# bun
-bun install
+```mermaid
+flowchart LR
+    Browser[Nuxt / Vue UI] --> Nitro[Nuxt server API]
+    Nitro -->|service role, solo servidor| Supabase[(Supabase)]
+    Nitro --> Excel[Importacion y exportacion Excel]
 ```
 
-## Development Server
+Las operaciones privilegiadas viven en `server/api`; la clave `service role` no
+se expone al navegador.
 
-Start the development server on `http://localhost:3000`:
+## Stack
+
+- Nuxt 4 y Vue 3
+- TypeScript
+- Supabase
+- ExcelJS y un parser CSV local sin dependencias vulnerables
+
+## Configuracion
+
+Requiere Node.js 20+ y un proyecto Supabase con las tablas utilizadas por los
+endpoints de `server/api`.
+
+Crea un archivo `.env` local:
+
+```dotenv
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_KEY=your-public-anon-key
+SUPABASE_SERVICE_ROLE=your-server-only-service-role
+PUBLIC_RESULT_BLOCK=3
+PUBLIC_VOTO_BLANCO=si
+```
+
+No publiques `SUPABASE_SERVICE_ROLE`; Nuxt la mantiene dentro de
+`runtimeConfig` privado.
+
+## Ejecucion
 
 ```bash
-# npm
+npm ci
 npm run dev
-
-# pnpm
-pnpm dev
-
-# yarn
-yarn dev
-
-# bun
-bun run dev
 ```
 
-## Production
-
-Build the application for production:
+Build de produccion:
 
 ```bash
-# npm
 npm run build
-
-# pnpm
-pnpm build
-
-# yarn
-yarn build
-
-# bun
-bun run build
-```
-
-Locally preview production build:
-
-```bash
-# npm
 npm run preview
-
-# pnpm
-pnpm preview
-
-# yarn
-yarn preview
-
-# bun
-bun run preview
 ```
 
-Check out the [deployment documentation](https://nuxt.com/docs/getting-started/deployment) for more information.
+## Rutas principales
+
+- `/login`: autenticacion.
+- `/docente`: gestion de alumnos y seguimiento.
+- `/votar`: flujo de votacion.
+- `/resultados`: resultados agregados.
+
+## Limitaciones conocidas
+
+- El esquema y las politicas RLS de Supabase deben versionarse antes de un
+  despliegue reproducible.
+- Para una eleccion oficial se requiere auditoria independiente, pruebas de
+  carga, respaldo y un modelo formal de amenazas.
+
+Estas limitaciones se mantienen explicitas para no presentar una aplicacion
+escolar como un sistema electoral certificado.
