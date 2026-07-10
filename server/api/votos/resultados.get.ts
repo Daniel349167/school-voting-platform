@@ -67,26 +67,93 @@ function buildZeroPayload(
   }
 }
 
+const DEMO_CANDIDATES: Candidato[] = [
+  { id: 1, nombre: 'Lista Horizonte' },
+  { id: 2, nombre: 'Lista Futuro' },
+]
+
+const DEMO_BY_GRADE: Record<number, [number, number, number]> = {
+  1: [16, 10, 1],
+  2: [14, 9, 1],
+  3: [13, 11, 1],
+  4: [12, 10, 1],
+  5: [15, 11, 1],
+}
+
+function demoList([horizonte, futuro, blanco]: [number, number, number]) {
+  return [
+    { id: DEMO_CANDIDATES[0].id, nombre: DEMO_CANDIDATES[0].nombre, conteo: horizonte },
+    { id: DEMO_CANDIDATES[1].id, nombre: DEMO_CANDIDATES[1].nombre, conteo: futuro },
+    { id: -1, nombre: 'Voto en blanco', conteo: blanco },
+  ]
+}
+
+function buildDemoPayload(block: number) {
+  const porGrado: Record<number, any> = {}
+  let horizonte = 0
+  let futuro = 0
+  let blanco = 0
+
+  for (const g of GRADOS) {
+    const counts = DEMO_BY_GRADE[g]
+    const emitidos = counts.reduce((sum, value) => sum + value, 0)
+    horizonte += counts[0]
+    futuro += counts[1]
+    blanco += counts[2]
+    porGrado[g] = {
+      totalAlumnos: 36,
+      emitidos,
+      porLista: demoList(counts),
+    }
+  }
+
+  return {
+    ok: true,
+    meta: { block, demo: true, source: 'simulated' },
+    notice: 'Modo demostracion: los resultados son datos simulados y no corresponden a una eleccion real.',
+    totales: {
+      totalAlumnos: 180,
+      totalEmitidos: horizonte + futuro + blanco,
+      porLista: demoList([horizonte, futuro, blanco]),
+    },
+    porGrado,
+  }
+}
+
+function demoFallbackEnabled(cfg: any) {
+  const raw = cfg?.public?.demoFallback ?? process.env.PUBLIC_DEMO_FALLBACK
+  return raw == null || !/^(0|false|no)$/i.test(String(raw))
+}
+
+function fallbackOrError(cfg: any, block: number, msg: string) {
+  return demoFallbackEnabled(cfg) ? buildDemoPayload(block) : { ok: false, msg }
+}
+
 export default defineEventHandler(async () => {
+  const cfg = useRuntimeConfig()
+  const BLOCK = getBlockSize(cfg)
+
   try {
-    const cfg = useRuntimeConfig()
-    const BLOCK = getBlockSize(cfg)
 
     const supabaseUrl = cfg?.public?.supabaseUrl
     const serviceRole = cfg?.supabaseServiceRole
     if (!supabaseUrl || !serviceRole) {
-      return { ok: false, msg: 'Config de Supabase faltante (URL o SERVICE_ROLE)' }
+      return fallbackOrError(cfg, BLOCK, 'Config de Supabase faltante (URL o SERVICE_ROLE)')
     }
 
     const supa = createClient(supabaseUrl, serviceRole)
 
     // === Catálogos ===
     const candQ = await supa.from('candidatos').select('id,nombre')
-    if (candQ.error) return { ok: false, msg: `Error leyendo candidatos: ${candQ.error.message}` }
+    if (candQ.error) {
+      return fallbackOrError(cfg, BLOCK, `Error leyendo candidatos: ${candQ.error.message}`)
+    }
     const candidatos = (candQ.data || []) as Candidato[]
 
     const alQ = await supa.from('alumnos').select('dni,grado,seccion')
-    if (alQ.error) return { ok: false, msg: `Error leyendo alumnos: ${alQ.error.message}` }
+    if (alQ.error) {
+      return fallbackOrError(cfg, BLOCK, `Error leyendo alumnos: ${alQ.error.message}`)
+    }
     const alumnos = (alQ.data || []) as Alumno[]
     const alumnosN = alumnos.map((a) => ({ ...a, grado: toNum(a.grado) }))
     const totalAlumnos = alumnosN.length
@@ -247,6 +314,6 @@ export default defineEventHandler(async () => {
     const msg =
       (e && e.message) ||
       (typeof e === 'string' ? e : 'Error inesperado en resultados')
-    return { ok: false, msg }
+    return fallbackOrError(cfg, BLOCK, msg)
   }
 })

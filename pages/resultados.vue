@@ -28,6 +28,10 @@
           {{ errorMsg }}
         </div>
 
+        <div v-if="demoMsg" class="demo-alert" role="status">
+          <strong>Demo de portafolio.</strong> {{ demoMsg }}
+        </div>
+
         <!-- Tabs -->
         <div class="tabs">
           <button
@@ -95,16 +99,18 @@ type PorGrado = Record<number, { totalAlumnos:number, emitidos:number, porLista:
 // Estructura opcional como llega desde la API (defensivo)
 type ApiPayload = {
   ok: boolean
-  meta?: { block?: number }
+  meta?: { block?: number, demo?: boolean, source?: string }
   totales?: Partial<Totales>
   porGrado?: Record<number, Partial<PorGrado[number]>>
   msg?: string
+  notice?: string
 }
 
 const GRADOS = [1,2,3,4,5] as const
 
 const loading = ref(false)
 const errorMsg = ref<string>('') // <-- NUEVO: mensaje suave
+const demoMsg = ref<string>('')
 const data = ref<{ totales: Totales, porGrado: PorGrado } | null>(null)
 const gradoSel = ref<'general'|1|2|3|4|5>('general')
 
@@ -151,6 +157,7 @@ function normalizePayload(p: ApiPayload | null | undefined): { totales: Totales,
 // =====================
 const fetchData = async () => {
   errorMsg.value = ''
+  demoMsg.value = ''
   loading.value = true
   try {
     const res = await $fetch<ApiPayload>('/api/votos/resultados').catch(() => null)
@@ -165,6 +172,9 @@ const fetchData = async () => {
     }
 
     data.value = normalizePayload(res)
+    if (res.meta?.demo) {
+      demoMsg.value = res.notice || 'Los datos visibles son simulados y no corresponden a una eleccion real.'
+    }
     await animateNow()
   } catch (e:any) {
     loading.value = false
@@ -270,6 +280,10 @@ const animateNow = async () => {
 .alert{
   background:#fff7ed; border:1px solid #fed7aa; color:#7c2d12;
   padding:10px 12px; border-radius:10px; margin-bottom:10px; font-weight:600;
+}
+.demo-alert{
+  background:#eff6ff; border:1px solid #bfdbfe; color:#1e3a8a;
+  padding:10px 12px; border-radius:10px; margin-bottom:10px;
 }
 
 /* Tabs */

@@ -47,10 +47,16 @@ SUPABASE_KEY=your-public-anon-key
 SUPABASE_SERVICE_ROLE=your-server-only-service-role
 PUBLIC_RESULT_BLOCK=3
 PUBLIC_VOTO_BLANCO=si
+PUBLIC_DEMO_FALLBACK=true
 ```
 
 No publiques `SUPABASE_SERVICE_ROLE`; Nuxt la mantiene dentro de
 `runtimeConfig` privado.
+
+`PUBLIC_DEMO_FALLBACK=true` mantiene la ruta publica de resultados util para
+una revision de portafolio cuando Supabase no esta disponible. En ese caso la
+interfaz muestra un aviso visible y usa exclusivamente datos simulados. Usa
+`false` en un despliegue operativo si prefieres mostrar el error real.
 
 ## Ejecucion
 
@@ -77,6 +83,8 @@ npm run preview
 
 - El esquema y las politicas RLS de Supabase deben versionarse antes de un
   despliegue reproducible.
+- El modo demostracion no habilita login, administracion ni emision de votos;
+  solo permite revisar la interfaz publica de resultados con datos simulados.
 - Para una eleccion oficial se requiere auditoria independiente, pruebas de
   carga, respaldo y un modelo formal de amenazas.
 
