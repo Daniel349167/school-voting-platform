@@ -27,6 +27,10 @@ flowchart LR
 Las operaciones privilegiadas viven en `server/api`; la clave `service role` no
 se expone al navegador.
 
+El [contrato de datos y sus límites de seguridad](docs/DATABASE.md) documenta
+las tablas y columnas que consume la aplicación, además de las tareas necesarias
+para convertirlo en un despliegue reproducible con RLS.
+
 ## Stack
 
 - Nuxt 4 y Vue 3
@@ -81,8 +85,8 @@ npm run preview
 
 ## Limitaciones conocidas
 
-- El esquema y las politicas RLS de Supabase deben versionarse antes de un
-  despliegue reproducible.
+- El contrato actual de Supabase está documentado, pero las migraciones y las
+  políticas RLS todavía deben versionarse antes de un despliegue reproducible.
 - El modo demostracion no habilita login, administracion ni emision de votos;
   solo permite revisar la interfaz publica de resultados con datos simulados.
 - Para una eleccion oficial se requiere auditoria independiente, pruebas de
