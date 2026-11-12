@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { hashPassword, verifyPassword, signSession, verifySession, requiredRole, validateVote } from '../shared/security.mjs'
+import { hashPassword, verifyPassword, signSession, verifySession, requiredRole, validateVote, sessionSigningKey } from '../shared/security.mjs'
 import { parseRoll } from '../shared/roll.mjs'
 import { summarize } from '../shared/results.mjs'
 
@@ -20,6 +20,21 @@ test('contraseñas con sal y sin compatibilidad con texto claro', () => {
   assert.equal(verifyPassword('una-contraseña-larga',h),true)
   assert.equal(verifyPassword('otra',h),false)
   assert.equal(verifyPassword('demo','demo'),false)
+})
+
+test('la sesión permite configuración explícita o una clave derivada exclusiva del servidor', () => {
+  const service='clave-privada-'.repeat(8)
+  const derived=sessionSigningKey(undefined,service)
+  assert.equal(derived.length,64)
+  assert.notEqual(derived,service)
+  assert.equal(derived,sessionSigningKey('',service))
+  assert.notEqual(derived,sessionSigningKey('',service+'otro'))
+  assert.equal(sessionSigningKey('s'.repeat(40),service),'s'.repeat(40))
+  assert.equal(sessionSigningKey('corto',service),'')
+  assert.equal(sessionSigningKey(undefined,'corto'),'')
+  const token=signSession({id:'1',role:'docente'},derived)
+  assert.equal(verifySession(token,derived).role,'docente')
+  assert.equal(verifySession(token,service),null)
 })
 
 test('las rutas sensibles exigen el rol correcto y el voto legado está deshabilitado', () => {

@@ -31,8 +31,10 @@ un proceso que suministre stdin sin imprimirlo.
 ## Despliegue
 
 Configura `SUPABASE_URL`, `SUPABASE_KEY`, `SUPABASE_SERVICE_ROLE`,
-`SESSION_SECRET` y `PUBLIC_VOTO_BLANCO` en Vercel. Reemplaza el secreto de
-ejemplo por uno aleatorio. Nuxt también acepta las variables equivalentes con
+`PUBLIC_VOTO_BLANCO` en Vercel. `SESSION_SECRET` es opcional: al omitirlo, se
+deriva una clave de sesión exclusiva de la credencial privada existente. Si lo
+configuras, utiliza al menos 32 caracteres aleatorios y elimina el valor de
+ejemplo. Nuxt también acepta las variables equivalentes con
 prefijo `NUXT_` para sobrescribir la configuración en ejecución.
 
 El proyecto utiliza Node.js 24, soportado por

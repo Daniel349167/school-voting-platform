@@ -4,6 +4,13 @@ export const SESSION_COOKIE = 'school_session'
 export const SESSION_SECONDS = 8 * 60 * 60
 const ROLES = new Set(['docente', 'aperturador'])
 
+export function sessionSigningKey(configured, serviceKey) {
+  if (configured) return typeof configured === 'string' && configured.length >= 32 ? configured : ''
+  if (typeof serviceKey !== 'string' || serviceKey.length < 32) return ''
+  // Clave derivada con un contexto exclusivo: nunca se firma con el token de Supabase directamente.
+  return createHmac('sha256', serviceKey).update('school-voting-platform/session/2026/v1').digest('hex')
+}
+
 export function signSession(user, secret, now = Date.now()) {
   if (!secret || secret.length < 32) throw new Error('SESSION_SECRET debe tener al menos 32 caracteres.')
   if (!ROLES.has(user.role)) throw new Error('Rol inválido.')

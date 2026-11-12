@@ -25,7 +25,9 @@ npm ci
 ```
 
 Copia `.env.example` a `.env` y configura la URL y las claves del proyecto.
-Genera `SESSION_SECRET` con al menos 32 caracteres aleatorios. La clave
+Opcionalmente, configura `SESSION_SECRET` con al menos 32 caracteres aleatorios.
+Si se omite, el servidor deriva una clave de sesión con HMAC y contexto exclusivo
+a partir de la credencial privada existente de Supabase. La clave
 `SUPABASE_SERVICE_ROLE` y el secreto de sesión son exclusivos del servidor.
 
 Ejecuta [la migración](supabase/migrations/202611120001_eleccion_2026.sql)
