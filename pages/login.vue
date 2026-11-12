@@ -2,18 +2,18 @@
   <div class="login-wrapper">
     <div class="login-card">
       <h1>🧑‍🏫 Votación Escolar</h1>
-      <p style="color:#777;margin-bottom:1rem;">Inicio de sesión del docente</p>
+      <p style="color:#777;margin-bottom:1rem;">Elecciones escolares 2026 · Acceso del personal</p>
 
       <form @submit.prevent="login">
         <input
           v-model="email"
-          type="email"
+          type="email" autocomplete="username" aria-label="Correo de acceso"
           placeholder="Correo institucional"
           required
         />
         <input
           v-model="password"
-          type="password"
+          type="password" autocomplete="current-password" aria-label="Contraseña"
           placeholder="Contraseña"
           required
         />
@@ -26,7 +26,7 @@
       </form>
 
       <div class="school-footer">
-        <p>© 2025 Colegio Nacional - Sistema de Votación</p>
+        <p>© 2026 I.E. 8161 Manuel Scorza Torre</p>
       </div>
       <!-- Link público a resultados en tiempo real -->
       <div class="public-results">

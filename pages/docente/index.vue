@@ -50,18 +50,25 @@
           <p class="muted">Administra alumnos, grados y visualiza el avance.</p>
         </div>
         <div class="teacher-badge">
-          ✅ Votación activa
+          {{ election?.abierta ? 'Votación abierta' : 'Votación cerrada' }}
         </div>
       </header>
 
+      <section class="teacher-card" style="margin-bottom:20px" aria-live="polite">
+        <h2>Elecciones escolares 2026</h2>
+        <p>{{ election ? `${election.alumnos} alumnos en padrón · ${election.votos} votos emitidos` : 'Consultando elección…' }}</p>
+        <p v-if="electionError" class="error">{{ electionError }}</p>
+        <button class="btn" :disabled="electionBusy || !election" @click="toggleElection">{{ election?.abierta ? 'Cerrar votación y publicar resultados' : 'Abrir votación' }}</button>
+        <NuxtLink to="/resultados" class="btn ghost" style="margin-left:12px">Ver resultados</NuxtLink>
+      </section>
       <!-- CARGA MASIVA -->
       <section v-if="current === 'cargar'">
         <div class="teacher-card">
           <h2 class="mb">Cargar alumnos desde Excel</h2>
           <p class="muted mb">
-            Sube el padrón de estudiantes por grado y sección. Acepta <b>.xlsx</b> y <b>.csv</b>.
+            Sube el padrón de estudiantes por grado y sección. Acepta <b>.xlsx</b>. Excluye trasladados y conserva los códigos de estudiantes sin DNI.
           </p>
-          <UploadAlumnos />
+          <UploadAlumnos @imported="loadElection" />
         </div>
       </section>
 
@@ -129,8 +136,9 @@ import GestionAlumnos from '~/components/GestionAlumnos.vue'
 const router = useRouter()
 const current = ref<'cargar' | 'estadisticas' | 'gestionar'>('cargar')
 
-const logout = () => {
-  router.push('/login')
+const logout = async () => {
+  await $fetch('/api/logout', {method:'POST'})
+  await router.push('/login')
 }
 
 const downloadExcel = () => {
@@ -151,7 +159,30 @@ const fetchRealtime = async () => {
   }
 }
 
-onMounted(() => {
+const election = ref<any>(null)
+const electionBusy = ref(false)
+const electionError = ref('')
+const loadElection = async () => {
+  try {
+    const res:any = await $fetch('/api/eleccion')
+    if (!res.ok) throw new Error(res.msg)
+    election.value = res
+  } catch (err:any) { electionError.value = err.data?.statusMessage || err.message }
+}
+const toggleElection = async () => {
+  if (!election.value || electionBusy.value) return
+  electionBusy.value = true; electionError.value = ''
+  try {
+    const res:any = await $fetch('/api/eleccion',{method:'POST',body:{abierta:!election.value.abierta}})
+    if (!res.ok) throw new Error(res.msg)
+    await loadElection()
+  } catch (err:any) { electionError.value = err.data?.statusMessage || err.message }
+  finally { electionBusy.value = false }
+}
+onMounted(async () => {
+  const session:any = await $fetch('/api/session')
+  if (!session.ok || session.role !== 'docente') { await router.replace('/login'); return }
+  await loadElection()
   if (current.value === 'estadisticas') fetchRealtime()
 })
 watch(current, (v) => { if (v === 'estadisticas') fetchRealtime() })

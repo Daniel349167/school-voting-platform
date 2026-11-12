@@ -1,8 +1,10 @@
+import { dbTable } from '../../utils/database'
 // server/api/alumnos/delete.post.ts
 import { defineEventHandler, readBody } from 'h3'
 import { createClient } from '@supabase/supabase-js'
 
 export default defineEventHandler(async (event) => {
+  if (!await rosterEditable()) return { ok:false, msg:'El padrón solo se modifica antes del primer voto y con la votación cerrada.' }
   const body = await readBody<{ dni: string }>(event)
 
   const config = useRuntimeConfig()
@@ -20,7 +22,7 @@ export default defineEventHandler(async (event) => {
   const supabase = createClient(supabaseUrl, serviceKey)
 
   const { error, count } = await supabase
-    .from('alumnos')
+    .from(dbTable('alumnos'))
     .delete({ count: 'exact' })
     .eq('dni', body.dni.trim())
 

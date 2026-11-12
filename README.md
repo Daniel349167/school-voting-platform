@@ -1,96 +1,89 @@
-# School Voting Platform
+# Votación escolar 2026
 
-Plataforma para digitalizar elecciones escolares, administrar alumnos por
-seccion, emitir votos y consultar resultados. Esta construida como aplicacion
-full stack con Nuxt 4, Vue 3, TypeScript y Supabase.
+Sistema para las elecciones de la I.E. 8161 Manuel Scorza Torre. Nuxt, Vue,
+TypeScript y Supabase. Incluye mesa de votación, padrón por salón, apertura y
+cierre de la jornada, resultados públicos y exportación a Excel.
 
-## Funcionalidades
+## Elección 2026
 
-- Inicio de sesion y sesiones de docentes/administradores.
-- Importacion masiva de alumnos desde Excel.
-- Alta y eliminacion de alumnos.
-- Flujo de votacion con verificacion previa y control de voto emitido.
-- Opcion configurable de voto en blanco.
-- Avance de votacion por salon y consulta en tiempo real.
-- Resultados agregados y exportacion a Excel.
-- Separacion entre credenciales publicas y `service role` del servidor.
+- Lista 1: imagen y lema proporcionados por la institución.
+- Lista 2: Juntos por un colegio mejor.
+- Los datos nuevos se guardan en tablas `eleccion_2026_*`, separadas de las
+  elecciones anteriores. La migración no borra tablas ni votos anteriores.
+- La elección comienza cerrada. El docente carga el padrón y abre la jornada.
+- Las papeletas no guardan el DNI ni el nombre. El padrón registra únicamente
+  si el alumno ya votó. Ambas operaciones se confirman en una transacción.
+- Durante la jornada se publica la participación. Los resultados por lista
+  se muestran al cerrar la votación.
 
-## Arquitectura
+## Preparación
 
-```mermaid
-flowchart LR
-    Browser[Nuxt / Vue UI] --> Nitro[Nuxt server API]
-    Nitro -->|service role, solo servidor| Supabase[(Supabase)]
-    Nitro --> Excel[Importacion y exportacion Excel]
-```
+Requiere Node.js 24.15 o posterior de la rama 24 y un proyecto Supabase activo.
 
-Las operaciones privilegiadas viven en `server/api`; la clave `service role` no
-se expone al navegador.
-
-El [contrato de datos y sus límites de seguridad](docs/DATABASE.md) documenta
-las tablas y columnas que consume la aplicación, además de las tareas necesarias
-para convertirlo en un despliegue reproducible con RLS.
-
-## Stack
-
-- Nuxt 4 y Vue 3
-- TypeScript
-- Supabase
-- ExcelJS y un parser CSV local sin dependencias vulnerables
-
-## Configuracion
-
-Requiere Node.js 20+ y un proyecto Supabase con las tablas utilizadas por los
-endpoints de `server/api`.
-
-Crea un archivo `.env` local:
-
-```dotenv
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_KEY=your-public-anon-key
-SUPABASE_SERVICE_ROLE=your-server-only-service-role
-PUBLIC_RESULT_BLOCK=3
-PUBLIC_VOTO_BLANCO=si
-PUBLIC_DEMO_FALLBACK=true
-```
-
-No publiques `SUPABASE_SERVICE_ROLE`; Nuxt la mantiene dentro de
-`runtimeConfig` privado.
-
-`PUBLIC_DEMO_FALLBACK=true` mantiene la ruta publica de resultados util para
-una revision de portafolio cuando Supabase no esta disponible. En ese caso la
-interfaz muestra un aviso visible y usa exclusivamente datos simulados. Usa
-`false` en un despliegue operativo si prefieres mostrar el error real.
-
-## Ejecucion
-
-```bash
+```sh
 npm ci
+```
+
+Copia `.env.example` a `.env` y configura la URL y las claves del proyecto.
+Genera `SESSION_SECRET` con al menos 32 caracteres aleatorios. La clave
+`SUPABASE_SERVICE_ROLE` y el secreto de sesión son exclusivos del servidor.
+
+Ejecuta [la migración](supabase/migrations/202611120001_eleccion_2026.sql)
+en el SQL Editor de Supabase. Después prepara e importa el padrón:
+
+```sh
+node scripts/prepare-roll.mjs "ruta/al/padron.xlsx" private/padron-2026.json
+node --env-file=.env scripts/setup-election.mjs import private/padron-2026.json
+```
+
+El lector reconoce las dos filas de cabeceras de SIAGIE, une los apellidos y
+normaliza secciones como `1A` a grado `1`, sección `A`. Excluye matrículas
+`TRASLADADO` por defecto. Para incluirlas al preparar un padrón utiliza
+`--include-transfers`. Los alumnos sin DNI conservan un identificador estable
+`CE-<código del estudiante>`. Las filas inválidas o duplicadas impiden importar.
+`private/` está excluido de Git. No subas padrones ni credenciales al repositorio.
+
+En un proyecto recuperado se pueden conservar los usuarios anteriores:
+
+```sh
+node --env-file=.env scripts/setup-election.mjs migrate-users
+```
+
+Esta operación copia los roles docente y aperturador a la elección nueva,
+protege las contraseñas con scrypt y no sobrescribe usuarios ya migrados.
+En un proyecto nuevo, usa la acción `user` documentada en
+[reactivación](docs/REACTIVACION.md).
+
+## Uso
+
+```sh
 npm run dev
 ```
 
-Build de produccion:
+- `/login`: ingreso del personal.
+- `/docente`: padrón, apertura/cierre, seguimiento y exportaciones.
+- `/votar`: mesa habilitada por un usuario con rol `aperturador`.
+- `/resultados`: participación y resultados públicos, sin información personal.
 
-```bash
+El padrón se puede modificar antes del primer voto y con la elección cerrada.
+Durante la elección queda protegido también mediante un trigger de PostgreSQL.
+La sesión dura ocho horas y el botón de cierre de sesión elimina la cookie.
+
+## Producción y comprobaciones
+
+```sh
+npm test
+npm audit --omit=dev --audit-level=high
 npm run build
 npm run preview
 ```
 
-## Rutas principales
+Las pruebas ejecutan la migración en PostgreSQL mediante PGlite y comprueban
+reversión de una transacción fallida, doble voto, cierre, voto en blanco, permisos,
+firmas de sesión y lectura del padrón. La integración continua ejecuta estos
+controles. PGlite se usa solo para pruebas, no para almacenar votos en producción.
 
-- `/login`: autenticacion.
-- `/docente`: gestion de alumnos y seguimiento.
-- `/votar`: flujo de votacion.
-- `/resultados`: resultados agregados.
-
-## Limitaciones conocidas
-
-- El contrato actual de Supabase está documentado, pero las migraciones y las
-  políticas RLS todavía deben versionarse antes de un despliegue reproducible.
-- El modo demostracion no habilita login, administracion ni emision de votos;
-  solo permite revisar la interfaz publica de resultados con datos simulados.
-- Para una eleccion oficial se requiere auditoria independiente, pruebas de
-  carga, respaldo y un modelo formal de amenazas.
-
-Estas limitaciones se mantienen explicitas para no presentar una aplicacion
-escolar como un sistema electoral certificado.
+En Vercel configura las mismas variables de `.env` y vuelve a desplegar.
+Consulta [reactivación y verificación](docs/REACTIVACION.md) y el
+[modelo de datos](docs/DATABASE.md). No se generan resultados simulados cuando
+la base de datos falla.

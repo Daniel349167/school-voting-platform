@@ -1,3 +1,4 @@
+import { dbTable } from '../../utils/database'
 import { defineEventHandler, readBody } from 'h3'
 import { createClient } from '@supabase/supabase-js'
 
@@ -10,7 +11,7 @@ export default defineEventHandler(async (event) => {
 
   // total del salón
   const { count: total, error: e1 } = await supa
-    .from('alumnos')
+    .from(dbTable('alumnos'))
     .select('*', { count: 'exact', head: true })
     .eq('grado', String(grado))
     .eq('seccion', seccion)
@@ -19,7 +20,7 @@ export default defineEventHandler(async (event) => {
 
   // faltan por votar
   const { count: faltan, error: e2 } = await supa
-    .from('alumnos')
+    .from(dbTable('alumnos'))
     .select('*', { count: 'exact', head: true })
     .eq('grado', String(grado))
     .eq('seccion', seccion)

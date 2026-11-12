@@ -11,8 +11,8 @@
       <form @submit.prevent="agregar">
         <div class="form-grid">
           <div>
-            <label>DNI *</label>
-            <input v-model="alumno.dni" type="text" required maxlength="15" />
+            <label>DNI o código de estudiante *</label>
+            <input v-model="alumno.dni" type="text" required maxlength="32" />
           </div>
           <div>
             <label>Nombres (opcional)</label>
@@ -79,9 +79,9 @@
 
     <!-- DESCARGA: Códigos generados (debajo del eliminar) -->
     <div class="inline-box mt">
-      <h3 class="mb-sm">⬇️ Descargar alumnos con código generado</h3>
+      <h3 class="mb-sm">⬇️ Descargar alumnos sin DNI</h3>
       <p class="muted mb-sm">
-        Exporta en Excel a todos los alumnos cuyo <b>dni</b> es un <b>código generado</b>
+        Exporta los códigos de estudiante de quienes no tienen DNI, para entregarlos en su salón.
       </p>
       <button class="upload-btn" @click="downloadCodigosGenerados">
         Descargar

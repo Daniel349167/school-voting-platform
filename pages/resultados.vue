@@ -28,8 +28,8 @@
           {{ errorMsg }}
         </div>
 
-        <div v-if="demoMsg" class="demo-alert" role="status">
-          <strong>Demo de portafolio.</strong> {{ demoMsg }}
+        <div v-if="notice" class="demo-alert" role="status">
+          {{ notice }}
         </div>
 
         <!-- Tabs -->
@@ -46,7 +46,7 @@
         </div>
 
         <!-- Resumen participación -->
-        <div class="cards">
+        <div v-if="data && !errorMsg" class="cards">
           <div class="card">
             <div class="kpi">{{ resumen.totalAlumnos }}</div>
             <div class="lbl">Votantes posibles</div>
@@ -62,7 +62,7 @@
         </div>
 
         <!-- Barras por lista -->
-        <div class="panel">
+        <div v-if="!resultsHidden && !errorMsg" class="panel">
           <h3 class="panel-title">Distribución por listas</h3>
           <div v-if="series.length===0" class="empty">Sin datos</div>
 
@@ -82,7 +82,7 @@
           </div>
         </div>
 
-        <p class="note">Los datos se muestran en bloques de publicación para proteger el secreto del voto.</p>
+        <p class="note">Los votos por lista se publican al cerrar la votación. Durante la jornada solo se muestra la participación.</p>
       </div>
     </div>
   </div>
@@ -99,7 +99,7 @@ type PorGrado = Record<number, { totalAlumnos:number, emitidos:number, porLista:
 // Estructura opcional como llega desde la API (defensivo)
 type ApiPayload = {
   ok: boolean
-  meta?: { block?: number, demo?: boolean, source?: string }
+  meta?: { resultsHidden?: boolean }
   totales?: Partial<Totales>
   porGrado?: Record<number, Partial<PorGrado[number]>>
   msg?: string
@@ -110,7 +110,8 @@ const GRADOS = [1,2,3,4,5] as const
 
 const loading = ref(false)
 const errorMsg = ref<string>('') // <-- NUEVO: mensaje suave
-const demoMsg = ref<string>('')
+const notice = ref('')
+const resultsHidden = ref(false)
 const data = ref<{ totales: Totales, porGrado: PorGrado } | null>(null)
 const gradoSel = ref<'general'|1|2|3|4|5>('general')
 
@@ -156,8 +157,9 @@ function normalizePayload(p: ApiPayload | null | undefined): { totales: Totales,
 // Carga de datos
 // =====================
 const fetchData = async () => {
+  if (loading.value) return
   errorMsg.value = ''
-  demoMsg.value = ''
+  notice.value = ''
   loading.value = true
   try {
     const res = await $fetch<ApiPayload>('/api/votos/resultados').catch(() => null)
@@ -172,9 +174,8 @@ const fetchData = async () => {
     }
 
     data.value = normalizePayload(res)
-    if (res.meta?.demo) {
-      demoMsg.value = res.notice || 'Los datos visibles son simulados y no corresponden a una eleccion real.'
-    }
+    notice.value = res.notice || ''
+    resultsHidden.value = res.meta?.resultsHidden === true
     await animateNow()
   } catch (e:any) {
     loading.value = false
@@ -185,9 +186,12 @@ const fetchData = async () => {
 }
 
 // Cargar datos una sola vez al entrar
+let refreshTimer: ReturnType<typeof setInterval> | undefined
 onMounted(() => {
   fetchData()
+  refreshTimer = setInterval(fetchData, 5000)
 })
+onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
 
 // =====================
 // Derivados UI robustos

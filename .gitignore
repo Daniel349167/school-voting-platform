@@ -22,3 +22,7 @@ logs
 .env
 .env.*
 !.env.example
+
+# Padrones, respaldos y credenciales de operación
+private/
+.vercel/

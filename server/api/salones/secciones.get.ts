@@ -1,3 +1,4 @@
+import { dbTable } from '../../utils/database'
 // server/api/salones/secciones.get.ts
 import { createClient } from '@supabase/supabase-js'
 
@@ -14,7 +15,7 @@ export default defineEventHandler(async (event) => {
 
   // alumnos.grado es TEXT en tu SQL, por eso comparamos con string
   const { data, error } = await supa
-    .from('alumnos')
+    .from(dbTable('alumnos'))
     .select('seccion')
     .eq('grado', grado)
 
