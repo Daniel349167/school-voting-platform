@@ -1,3 +1,4 @@
+import { dbTable } from '../../utils/database'
 // server/api/votos/realtime.get.ts
 import { defineEventHandler } from 'h3'
 import { createClient } from '@supabase/supabase-js'
@@ -21,18 +22,18 @@ export default defineEventHandler(async () => {
     const cfg = useRuntimeConfig()
     const supa = createClient(cfg.public.supabaseUrl, cfg.supabaseServiceRole)
 
-    const candQ = await supa.from('candidatos').select('id,nombre')
+    const candQ = await supa.from(dbTable('candidatos')).select('id,nombre')
     if (candQ.error) return { ok:false, msg:'Error leyendo candidatos' }
     const candidatos = (candQ.data || []) as Candidato[]
 
-    const alQ = await supa.from('alumnos').select('dni,grado,seccion')
+    const alQ = await supa.from(dbTable('alumnos')).select('dni,grado,seccion')
     if (alQ.error) return { ok:false, msg:'Error leyendo alumnos' }
     const alumnos = ((alQ.data || []) as Alumno[]).map(a => ({...a, grado: toNum(a.grado)}))
 
     // ✅ CHANGED: seleccionar creado_en, NO created_at
     const vtQ = await supa
-      .from('votos')
-      .select('dni,grado,seccion,candidato_id,en_blanco,creado_en') // CHANGED
+      .from(dbTable('votos'))
+      .select('grado,seccion,candidato_id,en_blanco,creado_en') // CHANGED
       .order('creado_en', { ascending: true })                       // CHANGED
     if (vtQ.error) return { ok:false, msg:'Error leyendo votos' }
 

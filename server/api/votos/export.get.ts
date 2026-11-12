@@ -1,3 +1,4 @@
+import { dbTable } from '../../utils/database'
 // server/api/votos/export.get.ts
 import { defineEventHandler, setResponseHeaders } from 'h3'
 import { createClient } from '@supabase/supabase-js'
@@ -111,7 +112,7 @@ export default defineEventHandler(async (event) => {
   // === Candidatos ===
   let candidatos: Candidato[] = []
   {
-    const q = await supa.from('candidatos').select('id,nombre') as any
+    const q = await supa.from(dbTable('candidatos')).select('id,nombre') as any
     if (q.error) return { ok: false, msg: `No se pudo leer candidatos: ${q.error.message}` }
     candidatos = (q.data || []) as Candidato[]
   }
@@ -119,9 +120,9 @@ export default defineEventHandler(async (event) => {
   // === Alumnos (si faltan nombres/apellidos, sigue igual) ===
   let alumnos: Alumno[] = []
   {
-    let q = await supa.from('alumnos').select('dni,grado,seccion,nombres,apellidos') as any
+    let q = await supa.from(dbTable('alumnos')).select('dni,grado,seccion,nombres,apellidos,ya_voto') as any
     if (q.error && q.error.code === '42703') {
-      q = await supa.from('alumnos').select('dni,grado,seccion') as any
+      q = await supa.from(dbTable('alumnos')).select('dni,grado,seccion') as any
       if (q.error) return { ok: false, msg: `No se pudo leer alumnos: ${q.error.message}` }
       alumnos = (q.data || []).map((a: any) => ({ ...a, nombres: null, apellidos: null })) as Alumno[]
     } else if (q.error) {
@@ -135,8 +136,8 @@ export default defineEventHandler(async (event) => {
   let votos: Voto[] = []
   {
     let q = await supa
-      .from('votos')
-      .select('dni,grado,seccion,candidato_id,en_blanco,creado_en')
+      .from(dbTable('votos'))
+      .select('grado,seccion,candidato_id,en_blanco,creado_en')
       .order('creado_en', { ascending: true }) as any
 
     if (q.error) {
@@ -144,8 +145,8 @@ export default defineEventHandler(async (event) => {
         votos = []
       } else if (q.error.code === '42703') {
         q = await supa
-          .from('votos')
-          .select('dni,grado,seccion,candidato_id,en_blanco,creado_en') as any
+          .from(dbTable('votos'))
+          .select('grado,seccion,candidato_id,en_blanco,creado_en') as any
         if (q.error) return { ok: false, msg: `No se pudo leer votos: ${q.error.message}` }
         votos = (q.data || []) as Voto[]
       } else {
@@ -412,24 +413,14 @@ export default defineEventHandler(async (event) => {
     ws2.addRow([]) // separación visual
   }
 
-  // ===== Hoja 3: Votos (detalle) =====
-  const ws3 = wb.addWorksheet('Votos (detalle)')
-  ws3.columns = [
-    { key: 'dni', width: 14 },
-    { key: 'nombres', width: 36 },   // "Apellidos, Nombres"
-    { key: 'grado', width: 8 },
-    { key: 'seccion', width: 8 },
-    { key: 'fecha', width: 22 }
-  ]
-  sheetTitle(ws3, 'Listado de votos (orden cronológico)')
-  headerRow(ws3, ['DNI', 'Nombres', 'Grado', 'Sección', 'Fecha (Lima)'])
-
-  for (const v of votosN) {
-    const nombre = nameByDni[v.dni] || '' // "Apellidos, Nombres" si existe
-    const fecha = v.created_at ? toLimaDate(v.created_at) : ''
-    ws3.addRow([v.dni, nombre, v.grado, v.seccion, fecha])
+  // Participación separada de las papeletas: nunca exporta la lista elegida por alumno.
+  const ws3 = wb.addWorksheet('Participación')
+  ws3.columns = [{width:24},{width:50},{width:10},{width:12},{width:16}]
+  sheetTitle(ws3, 'Participación del padrón')
+  headerRow(ws3, ['DNI o código', 'Nombres', 'Grado', 'Sección', 'Emitió su voto'])
+  for (const a of alumnosN) {
+    ws3.addRow([a.dni, nameByDni[a.dni] || '', a.grado, a.seccion, (a as any).ya_voto ? 'Sí' : 'No'])
   }
-  ws3.getColumn(5).numFmt = 'yyyy-mm-dd hh:mm:ss'
 
   // → Buffer y respuesta
   const buf = await wb.xlsx.writeBuffer()

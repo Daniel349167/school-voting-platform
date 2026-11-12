@@ -1,6 +1,6 @@
-import { defineEventHandler, getCookie } from 'h3'
-
+import { defineEventHandler } from 'h3'
+import { getSchoolSession } from '../utils/auth'
 export default defineEventHandler((event) => {
-  const role = getCookie(event, 'user_role') || null
-  return { ok: !!role, role }
+  const session = getSchoolSession(event)
+  return { ok: !!session, role: session?.role ?? null }
 })

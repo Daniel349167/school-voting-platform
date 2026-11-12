@@ -1,3 +1,4 @@
+import { dbTable } from '../../utils/database'
 // server/api/alumnos/export-codigos.get.ts
 import { defineEventHandler, setResponseHeaders } from 'h3'
 import { createClient } from '@supabase/supabase-js'
@@ -10,7 +11,7 @@ export default defineEventHandler(async (event) => {
 
   // 1) Trae alumnos
   const { data, error } = await supabase
-    .from('alumnos')
+    .from(dbTable('alumnos'))
     .select('dni, nombres, apellidos, grado, seccion')
 
   if (error) {
@@ -18,7 +19,7 @@ export default defineEventHandler(async (event) => {
   }
 
   // 2) Filtra solo los de DNI generado: "Letra + 3 dígitos"
-  const reGen = /^[A-Za-z][0-9]{3}$/
+  const reGen = /^CE-[A-Z0-9]+$/
   const filtrados = (data || []).filter(a => reGen.test(String(a?.dni ?? '')))
 
   // 3) Normaliza y ORDENA (grado numérico → sección → apellidos → nombres)

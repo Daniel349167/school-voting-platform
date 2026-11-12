@@ -1,3 +1,4 @@
+import { dbTable } from '../../utils/database'
 // server/api/votos/estado.get.ts
 import { defineEventHandler, getQuery } from 'h3'
 import { createClient } from '@supabase/supabase-js'
@@ -24,7 +25,7 @@ export default defineEventHandler(async (event) => {
 
       // Total
       const { count: totalCount, error: e1 } = await supa
-        .from('alumnos')
+        .from(dbTable('alumnos'))
         .select('dni', { count: 'exact', head: true })
         .match(match)
 
@@ -33,7 +34,7 @@ export default defineEventHandler(async (event) => {
 
       // Votaron
       const { count: votaronCount, error: e2 } = await supa
-        .from('alumnos')
+        .from(dbTable('alumnos'))
         .select('dni', { count: 'exact', head: true })
         .match(match)
         .eq('ya_voto', true)
@@ -43,13 +44,13 @@ export default defineEventHandler(async (event) => {
     } else {
       // ===== Conteo GENERAL (todos los grados) =====
       const { count: totalCount, error: e1 } = await supa
-        .from('alumnos')
+        .from(dbTable('alumnos'))
         .select('dni', { count: 'exact', head: true })
       if (e1) throw e1
       total = totalCount || 0
 
       const { count: votaronCount, error: e2 } = await supa
-        .from('alumnos')
+        .from(dbTable('alumnos'))
         .select('dni', { count: 'exact', head: true })
         .eq('ya_voto', true)
       if (e2) throw e2

@@ -50,18 +50,27 @@
           <p class="muted">Administra alumnos, grados y visualiza el avance.</p>
         </div>
         <div class="teacher-badge">
-          ✅ Votación activa
+          {{ election?.abierta ? 'Votación abierta' : 'Votación cerrada' }}
         </div>
       </header>
 
+      <section class="teacher-card election-card" aria-live="polite">
+        <h2>Elecciones escolares 2026</h2>
+        <p>{{ election ? `${election.alumnos} alumnos en padrón · ${election.votos} votos emitidos` : 'Consultando elección…' }}</p>
+        <p v-if="electionError" class="error">{{ electionError }}</p>
+        <div class="election-actions">
+          <button class="btn" :disabled="electionBusy || !election" @click="toggleElection">{{ election?.abierta ? 'Cerrar votación y publicar resultados' : 'Abrir votación' }}</button>
+          <NuxtLink to="/resultados" class="btn ghost">Ver resultados</NuxtLink>
+        </div>
+      </section>
       <!-- CARGA MASIVA -->
       <section v-if="current === 'cargar'">
         <div class="teacher-card">
           <h2 class="mb">Cargar alumnos desde Excel</h2>
           <p class="muted mb">
-            Sube el padrón de estudiantes por grado y sección. Acepta <b>.xlsx</b> y <b>.csv</b>.
+            Sube el padrón de estudiantes por grado y sección. Acepta <b>.xlsx</b>. Excluye trasladados y conserva los códigos de estudiantes sin DNI.
           </p>
-          <UploadAlumnos />
+          <UploadAlumnos @imported="loadElection" />
         </div>
       </section>
 
@@ -129,8 +138,9 @@ import GestionAlumnos from '~/components/GestionAlumnos.vue'
 const router = useRouter()
 const current = ref<'cargar' | 'estadisticas' | 'gestionar'>('cargar')
 
-const logout = () => {
-  router.push('/login')
+const logout = async () => {
+  await $fetch('/api/logout', {method:'POST'})
+  await router.push('/login')
 }
 
 const downloadExcel = () => {
@@ -151,7 +161,30 @@ const fetchRealtime = async () => {
   }
 }
 
-onMounted(() => {
+const election = ref<any>(null)
+const electionBusy = ref(false)
+const electionError = ref('')
+const loadElection = async () => {
+  try {
+    const res:any = await $fetch('/api/eleccion')
+    if (!res.ok) throw new Error(res.msg)
+    election.value = res
+  } catch (err:any) { electionError.value = err.data?.statusMessage || err.message }
+}
+const toggleElection = async () => {
+  if (!election.value || electionBusy.value) return
+  electionBusy.value = true; electionError.value = ''
+  try {
+    const res:any = await $fetch('/api/eleccion',{method:'POST',body:{abierta:!election.value.abierta}})
+    if (!res.ok) throw new Error(res.msg)
+    await loadElection()
+  } catch (err:any) { electionError.value = err.data?.statusMessage || err.message }
+  finally { electionBusy.value = false }
+}
+onMounted(async () => {
+  const session:any = await $fetch('/api/session')
+  if (!session.ok || session.role !== 'docente') { await router.replace('/login'); return }
+  await loadElection()
   if (current.value === 'estadisticas') fetchRealtime()
 })
 watch(current, (v) => { if (v === 'estadisticas') fetchRealtime() })
@@ -177,6 +210,12 @@ const colorClass = (i:number) => ['c-a','c-b','c-c','c-d','c-e'][i % 5]
 </script>
 
 <style scoped>
+.election-card{margin-bottom:20px}
+.election-actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:16px}
+.election-actions .btn{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:10px 18px;border:1px solid #158376;border-radius:10px;background:#168778;color:#fff;font:inherit;font-weight:600;text-decoration:none;cursor:pointer}
+.election-actions .btn.ghost{background:#f0fdfa;color:#126558;border-color:#a5d9d0}
+.election-actions .btn:focus-visible{outline:3px solid #38bdf8;outline-offset:3px}
+.election-actions .btn:disabled{opacity:.6;cursor:wait}
 /* ===== Footer & Logout (CAMBIADO para estilo sobrio) ===== */
 .teacher-footer{
   margin-top:auto;

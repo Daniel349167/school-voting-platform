@@ -1,3 +1,4 @@
+import { dbTable } from '../../utils/database'
 // server/api/alumnos/import.post.ts
 import { defineEventHandler, readBody } from 'h3'
 import { createClient } from '@supabase/supabase-js'
@@ -50,9 +51,12 @@ function normalizeSeccion(v: unknown): string {
 }
 
 export default defineEventHandler(async (event) => {
+  if (!await rosterEditable()) return { ok:false, msg:'El padrón solo se modifica antes del primer voto y con la votación cerrada.' }
   // 1) Payload
   const body = await readBody<{ alumnos: AlumnoIn[]; totalRows?: number }>(event)
   const recibidos = Array.isArray(body?.alumnos) ? body.alumnos : []
+  if (recibidos.length > 2000) return { ok:false, msg:'El archivo supera 2000 alumnos.' }
+  if (recibidos.some(a => !/^[A-Z0-9-]{4,32}$/.test(String(a?.dni ?? '')) || !String(a?.nombres ?? '').trim() || !String(a?.apellidos ?? '').trim() || !/^[1-5]$/.test(normalizeGradoToText(a?.grado)) || !/^[A-Z]{1,3}$/.test(normalizeSeccion(a?.seccion)))) return { ok:false, msg:'El padrón contiene filas inválidas. Corrígelas antes de importar.' }
   const totalRecibidos =
     typeof body?.totalRows === 'number' ? body.totalRows : recibidos.length
 
@@ -115,7 +119,7 @@ export default defineEventHandler(async (event) => {
     const slice = preparados.slice(i, i + BATCH_SIZE)
 
     const { data, error } = await supa
-      .from('alumnos')
+      .from(dbTable('alumnos'))
       .upsert(slice, { onConflict: 'dni', ignoreDuplicates: false })
       .select('dni') // contar filas afectadas
 

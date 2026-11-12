@@ -3,7 +3,9 @@ const router = useRouter()
 
 // === Flag "Voto en blanco" desde runtimeConfig ===
 const { public: pub } = useRuntimeConfig()
+const ballotAllowsBlank = ref(true)
 const allowVotoBlanco = computed(() => {
+  if (!ballotAllowsBlank.value) return false
   const raw = (pub.VOTO_BLANCO ?? 'yes').toString().toLowerCase().trim()
   // cualquier valor distinto de 'no' -> habilita
   return raw !== 'no'
@@ -71,8 +73,8 @@ const confetti = ref(Array.from({length: 22}).map(() => ({
 
 // Rutas de imágenes (coloca los archivos en /public/img/…)
 const IMG_LOGO          = '/img/logo-8161.png'
-const IMG_LISTA_1       = '/img/lista-1.png'
-const IMG_LISTA_2       = '/img/lista-2.png'
+const IMG_LISTA_1       = '/img/lista-1-2026.jpeg'
+const IMG_LISTA_2       = '/img/lista-2-2026.jpeg'
 const IMG_LISTA_GENERIC = '/img/lista-generic.png'
 const IMG_VOTO_BLANCO   = '/img/voto-blanco.png'
 
@@ -87,6 +89,7 @@ const onDniInput = (e: Event) => {
 
 const verificarDNI = async () => {
   error.value = ''
+  if (loading.value) return
   if (!dni.value.trim()) { error.value = 'Ingresa el DNI.'; return }
   loading.value = true
 
@@ -103,13 +106,14 @@ const verificarDNI = async () => {
   if (res.alumno?.en_colegio === false) { error.value = 'No estás registrado en el padrón del colegio.'; return }
   if (res.alumno?.ya_voto) { error.value = 'Este DNI ya emitió su voto.'; return }
 
+  ballotAllowsBlank.value = (res as any).votoBlanco !== false
   alumno.value = res.alumno
 
   // Asigna imágenes a las listas
-  const imgsByIndex = [IMG_LISTA_1, IMG_LISTA_2]
-  candidatos.value = (res.candidatos as Candidato[]).map((c: Candidato, idx: number) => ({
+
+  candidatos.value = (res.candidatos as Candidato[]).map((c: Candidato) => ({
     ...c,
-    imagen: imgsByIndex[idx] ?? IMG_LISTA_GENERIC
+    imagen: c.imagen || (c.id === 1 ? IMG_LISTA_1 : c.id === 2 ? IMG_LISTA_2 : IMG_LISTA_GENERIC)
   }))
 
   elegido.value = null
@@ -117,6 +121,7 @@ const verificarDNI = async () => {
 }
 
 const emitirVoto = async () => {
+  if (loading.value) return
   error.value = ''
 
   if (!allowVotoBlanco.value && elegido.value === 'blanco') {
@@ -166,7 +171,7 @@ const emitirVoto = async () => {
           <div class="hero-top">
             <div class="brand">
               <!-- Logo -->
-              <img :src="IMG_LOGO" alt="I.E. 3045" class="brand-logo" />
+              <img :src="IMG_LOGO" alt="I.E. 8161 Manuel Scorza Torre" class="brand-logo" />
               <div>
                 <h1>Votación Escolar</h1>
                 <p class="muted">Sesión abierta por el profesor</p>
@@ -190,7 +195,7 @@ const emitirVoto = async () => {
         <div class="content-area" :class="{ votar: step === 'votar' }">
           <!-- Paso: DNI -->
           <section v-if="step==='dni'" class="section dni-step">
-            <h2 class="step">1) Ingresa tu DNI</h2>
+            <h2 class="step">1) Ingresa tu DNI o código</h2>
 
             <div class="dni-grid">
               <!-- Panel principal con el input -->
@@ -204,7 +209,7 @@ const emitirVoto = async () => {
                     ref="dniInput"
                     class="text-input lg dni-upper"
                     v-model="dni"
-                    placeholder="DNI"
+                    placeholder="DNI o código de estudiante" maxlength="32" aria-label="DNI o código de estudiante"
                     inputmode="text"
                     autocomplete="off"
                     @input="onDniInput"
@@ -515,7 +520,8 @@ label{display:block;margin-bottom:6px;color:#334155;font-weight:600}
   transition:.18s;cursor:pointer;
 }
 .card:hover{transform:translateY(-2px);box-shadow:0 10px 22px rgba(0,0,0,.08)}
-.card input{display:none}
+.card input{position:absolute;opacity:0;width:1px;height:1px}
+.card:focus-within{outline:3px solid #2563eb;outline-offset:3px}
 
 /* contenedor de imagen que NO recorta (contain) */
 .card-img{

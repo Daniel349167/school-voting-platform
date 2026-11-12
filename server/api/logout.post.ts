@@ -1,6 +1,7 @@
-import { defineEventHandler, setCookie } from 'h3'
-
-export default defineEventHandler(async (event) => {
-  setCookie(event, 'user_role', '', { httpOnly: true, sameSite: 'lax', path: '/', maxAge: 0 })
+import { defineEventHandler, deleteCookie } from 'h3'
+import { SESSION_COOKIE } from '../../shared/security.mjs'
+export default defineEventHandler((event) => {
+  deleteCookie(event, SESSION_COOKIE, { path: '/' })
+  deleteCookie(event, 'user_role', { path: '/' })
   return { ok: true }
 })
