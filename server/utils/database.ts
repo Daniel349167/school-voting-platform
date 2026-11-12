@@ -1,8 +1,13 @@
 import { createClient } from '@supabase/supabase-js'
 import { createError } from 'h3'
+import { electionTablePrefix, electionVoteFunction } from './practice-scope.mjs'
 
 export function dbTable(name: string) {
-  return `${useRuntimeConfig().databasePrefix}${name}`
+  return `${electionTablePrefix(useRuntimeConfig().databasePrefix)}${name}`
+}
+
+export function getVoteFunction() {
+  return electionVoteFunction(useRuntimeConfig().voteFunction)
 }
 
 export function getDatabase() {
