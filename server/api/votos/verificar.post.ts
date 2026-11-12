@@ -1,6 +1,7 @@
 import { dbTable } from '../../utils/database'
 import { defineEventHandler, readBody } from 'h3'
 import { createClient } from '@supabase/supabase-js'
+import { blankVoteEnabled } from '../../../shared/election-options.mjs'
 
 type VerificarBody = {
   dni: string
@@ -70,7 +71,7 @@ export default defineEventHandler(async (event) => {
   return {
     ok: true,
     alumno: { ...al, en_colegio: true },
-    votoBlanco: election.voto_blanco,
+    votoBlanco: election.voto_blanco && blankVoteEnabled(cfg.public.VOTO_BLANCO),
     candidatos: cands || []
   }
 })
