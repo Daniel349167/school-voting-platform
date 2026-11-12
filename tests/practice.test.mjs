@@ -4,6 +4,12 @@ import fs from 'node:fs/promises'
 import { PGlite } from '@electric-sql/pglite'
 import { withPracticeDatabase,electionTablePrefix,electionVoteFunction } from '../server/utils/practice-scope.mjs'
 import { requiredRole } from '../shared/security.mjs'
+import { blankVoteEnabled } from '../shared/election-options.mjs'
+
+test('la práctica respeta las opciones habilitadas por la institución',()=>{
+  for(const v of ['no','false','0','off',false])assert.equal(blankVoteEnabled(v),false)
+  for(const v of ['si','sí','yes','true','1','on',' SI ',true])assert.equal(blankVoteEnabled(v),true)
+})
 
 test('la práctica mantiene su contexto separado de solicitudes reales simultáneas',async()=>{
   const prefix=()=>electionTablePrefix('eleccion_2026_')
