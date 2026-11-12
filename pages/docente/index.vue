@@ -61,6 +61,7 @@
         <div class="election-actions">
           <button class="btn" :disabled="electionBusy || !election" @click="toggleElection">{{ election?.abierta ? 'Cerrar votación y publicar resultados' : 'Abrir votación' }}</button>
           <NuxtLink to="/resultados" class="btn ghost">Ver resultados</NuxtLink>
+          <NuxtLink to="/practica" class="btn ghost">Practicar con alumnos ficticios</NuxtLink>
         </div>
       </section>
       <!-- CARGA MASIVA -->

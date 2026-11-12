@@ -44,6 +44,8 @@ export function verifyPassword(password, stored) {
 }
 
 export function requiredRole(path) {
+  if (path === '/api/practica/control') return 'docente'
+  if (path === '/api/practica/verificar' || path === '/api/practica/emitir') return 'aperturador'
   if (path === '/api/votar') return 'disabled'
   if (path.startsWith('/api/alumnos/') || path === '/api/eleccion' || path === '/api/votos/export' || path === '/api/votos/realtime') return 'docente'
   if (path.startsWith('/api/salones/') || path === '/api/votos/avance-salon' || path === '/api/votos/estado') return 'authenticated'

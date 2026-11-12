@@ -30,6 +30,7 @@
       </div>
       <!-- Link público a resultados en tiempo real -->
       <div class="public-results">
+        <NuxtLink to="/practica" class="btn ghost wide" style="margin-bottom:10px">Practicar con alumnos ficticios</NuxtLink>
         <NuxtLink to="/resultados" class="btn ghost wide">
           📊 Ver resultados en tiempo real
         </NuxtLink>
@@ -43,6 +44,7 @@
 
 <script setup lang="ts">
 const router = useRouter()
+const route = useRoute()
 const email = ref('')
 const password = ref('')
 const error = ref('')
@@ -56,6 +58,7 @@ const login = async () => {
   loading.value = false
 
   if (!res?.ok) { error.value = res?.msg || 'No se pudo ingresar'; return }
+  if (route.query.next === '/practica') { await router.push('/practica'); return }
 
   if (res.role === 'docente') router.push('/docente')
   else if (res.role === 'aperturador') router.push('/votar')

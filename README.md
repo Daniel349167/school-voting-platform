@@ -59,6 +59,12 @@ En un proyecto nuevo, usa la acción `user` documentada en
 
 ## Uso
 
+Para ensayar con datos ficticios abre `/practica`. Usa las mismas cuentas del
+personal: el docente abre/cierra o reinicia la práctica y la mesa vota con
+`PRUEBA01`, `PRUEBA02` o `PRUEBA03`. Sus tablas `practica_2026_*` están separadas
+de la elección real. El reinicio solo borra votos ficticios. La práctica reutiliza
+la misma verificación y función transaccional, con referencias a sus propias tablas.
+
 ```sh
 npm run dev
 ```
