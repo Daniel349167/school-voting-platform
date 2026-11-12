@@ -35,6 +35,7 @@ test('votar, repetir y reiniciar en práctica conservan intacta la elección rea
     await db.exec(await fs.readFile(new URL('../supabase/migrations/202611120001_eleccion_2026.sql',import.meta.url),'utf8'))
     const practice=await fs.readFile(new URL('../supabase/migrations/202611120003_practica.sql',import.meta.url),'utf8')
     await db.exec(practice)
+    await db.exec(await fs.readFile(new URL('../supabase/migrations/202611120004_reinicio_practica.sql',import.meta.url),'utf8'))
     await db.exec("insert into eleccion_2026_alumnos(dni,nombres,apellidos,grado,seccion)values('REAL0001','Alumno','Real','1','A');update eleccion_2026_configuracion set abierta=true where id=1;")
     const count=async(table)=>(await db.query(`select count(*)::int n from ${table}`)).rows[0].n
     const vote=async(dni,id,blank)=>(await db.query('select emitir_voto_practica_2026($1,$2,$3) r',[dni,id,blank])).rows[0].r
@@ -44,6 +45,7 @@ test('votar, repetir y reiniciar en práctica conservan intacta la elección rea
     assert.equal((await vote('PRUEBA01',1,false)).ok,true)
     assert.equal((await vote('PRUEBA01',2,false)).ok,false)
     await db.exec(practice)
+    await db.exec(await fs.readFile(new URL('../supabase/migrations/202611120004_reinicio_practica.sql',import.meta.url),'utf8'))
     assert.equal(await count('practica_2026_votos'),1)
     assert.equal((await vote('PRUEBA02',null,true)).ok,true)
     assert.equal((await vote('REAL0001',1,false)).ok,false)
