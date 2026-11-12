@@ -1,7 +1,8 @@
 <template>
   <div class="upload-box">
-    <label class="upload-label">Seleccionar padrón Excel</label>
+    <label for="padron-file" class="upload-label">Seleccionar padrón Excel</label>
     <input
+      id="padron-file"
       type="file"
       accept=".xlsx"
       @change="onFileChange"

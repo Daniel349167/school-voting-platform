@@ -30,8 +30,9 @@ Si se omite, el servidor deriva una clave de sesión con HMAC y contexto exclusi
 a partir de la credencial privada existente de Supabase. La clave
 `SUPABASE_SERVICE_ROLE` y el secreto de sesión son exclusivos del servidor.
 
-Ejecuta [la migración](supabase/migrations/202611120001_eleccion_2026.sql)
-en el SQL Editor de Supabase. Después prepara e importa el padrón:
+Ejecuta las migraciones de `supabase/migrations/` en orden en el SQL Editor de
+Supabase. La primera crea la elección y la segunda cierra el acceso directo a
+las tablas anteriores sin borrar sus registros. Después prepara e importa el padrón:
 
 ```sh
 node scripts/prepare-roll.mjs "ruta/al/padron.xlsx" private/padron-2026.json

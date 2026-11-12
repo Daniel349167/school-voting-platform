@@ -10,6 +10,13 @@ test('migración real de PostgreSQL, voto atómico, padrón inmutable y acceso r
     const migration=await fs.readFile(new URL('../supabase/migrations/202611120001_eleccion_2026.sql',import.meta.url),'utf8')
     await db.exec(migration)
     await db.exec(migration) // reproducible y sin reiniciar votos ni configuración
+    await db.exec("create table public.usuarios(email text); insert into public.usuarios values ('anterior@colegio.invalid'); grant select on public.usuarios to anon;")
+    const lockdown=await fs.readFile(new URL('../supabase/migrations/202611120002_proteger_tablas_anteriores.sql',import.meta.url),'utf8')
+    await db.exec(lockdown)
+    assert.equal((await db.query('select count(*)::int n from public.usuarios')).rows[0].n,1)
+    await db.exec('set role anon')
+    await assert.rejects(db.query('select * from public.usuarios'),/permission denied/)
+    await db.exec('reset role')
     await db.exec("insert into eleccion_2026_alumnos(dni,nombres,apellidos,grado,seccion) values ('00123456','ANA','PEREZ','1','A'),('00123457','LUIS','PAZ','2','B'),('00123458','EVA','DIAZ','3','C')")
     const vote=async (dni,id,blank)=> (await db.query('select emitir_voto_2026($1,$2,$3) as r',[dni,id,blank])).rows[0].r
     assert.equal((await vote('00123456',1,false)).ok,false) // cerrada por defecto

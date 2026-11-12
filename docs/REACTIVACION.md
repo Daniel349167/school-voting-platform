@@ -1,18 +1,22 @@
 # Reactivación
 
-La web anterior está en `https://votacion-escolar-8161.vercel.app`.
-Al revisar la instalación el 12 de noviembre de 2026, su API pública devolvía
-`meta.demo=true`, con datos simulados. El dominio del proyecto Supabase guardado
-en la copia local no resolvía DNS. Esto no permite distinguir por sí solo entre
-un proyecto pausado, eliminado o una dirección que ya no corresponde.
+La web está en `https://votacion-escolar-8161.vercel.app`. Su base de producción
+es el proyecto Supabase `kppxekadderegjjkrfcb`, llamado "Voto Electronico - 8161".
+Se restauró el 12 de noviembre de 2026. La elección 2026 utiliza apertura manual,
+las dos listas nuevas y el padrón definitivo preparado para esta elección.
+
+La copia local antigua apuntaba al proyecto distinto `jaswloybzhqvdywzqvti`.
+Antes de importar o ejecutar una migración, comprueba que la URL de `.env`
+corresponda al entorno deseado y coincida con las variables de Vercel.
 
 ## Base de datos
 
 1. Revisa el proyecto en el [panel de Supabase](https://supabase.com/dashboard).
    Si está pausado, restáuralo. Si ya no existe, utiliza un proyecto nuevo.
 2. Configura la URL y las claves actuales en `.env` y en Vercel. No las subas a Git.
-3. Ejecuta el SQL de `supabase/migrations/202611120001_eleccion_2026.sql`.
-   Crea únicamente las tablas nuevas y las funciones de la elección 2026.
+3. Ejecuta los SQL de `supabase/migrations/` en orden. Crean las tablas y
+   funciones de la elección 2026 y bloquean las consultas directas anónimas a
+   las tablas anteriores. No eliminan registros de elecciones anteriores.
 4. Ejecuta `scripts/prepare-roll.mjs` y la acción `import` de
    `scripts/setup-election.mjs`, siguiendo el README.
 5. En un proyecto recuperado, ejecuta `migrate-users`. En uno nuevo, crea un
